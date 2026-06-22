@@ -98,12 +98,9 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
         <button class="menu-btn" onclick="toggleSidebar()">☰</button>
         <h1>🦀 我们的家</h1>
       </div>
-      <div style="display:flex;align-items:center;gap:4px">
-        <select class="model-sel" id="modelSel" onchange="saveLocal()">
-          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-        </select>
-        <button class="h-btn" onclick="refreshModels()" title="刷新模型列表" style="padding:4px 6px;font-size:11px">🔄</button>
-      </div>
+      <input class="model-sel" id="modelSel" type="text" placeholder="模型名称" 
+        onchange="saveLocal()" oninput="saveLocal()"
+        style="width:160px;border-radius:8px;padding:5px 8px;font-size:11px">
     </div>
     <div class="messages" id="messages">
       <div class="empty-state" id="emptyState"><div class="empty-crabs">🦀 🦀</div><p>两只小螃蟹的家<br>点左上角 ☰ 新建对话</p></div>
