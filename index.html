@@ -98,11 +98,12 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
         <button class="menu-btn" onclick="toggleSidebar()">☰</button>
         <h1>🦀 我们的家</h1>
       </div>
-      <select class="model-sel" id="modelSel" onchange="saveLocal()">
-        <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-        <option value="claude-opus-4-6">Opus 4.6</option>
-        <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
-      </select>
+      <div style="display:flex;align-items:center;gap:4px">
+        <select class="model-sel" id="modelSel" onchange="saveLocal()">
+          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+        </select>
+        <button class="h-btn" onclick="refreshModels()" title="刷新模型列表" style="padding:4px 6px;font-size:11px">🔄</button>
+      </div>
     </div>
     <div class="messages" id="messages">
       <div class="empty-state" id="emptyState"><div class="empty-crabs">🦀 🦀</div><p>两只小螃蟹的家<br>点左上角 ☰ 新建对话</p></div>
@@ -154,7 +155,7 @@ let currentSession=null,sessions=[],streaming=false;
   try{Object.assign(cfg,JSON.parse(localStorage.getItem(LOCAL_KEY)||'{}'))}catch(e){}
   if(cfg.model){const s=document.getElementById('modelSel');if(s)s.value=cfg.model}
   if(!cfg.base)setTimeout(()=>openPanel('settings'),300);
-  else{loadSessions();loadSettingsToUI()}
+  else{loadSessions();loadSettingsToUI();refreshModels()}
 })();
 
 function saveLocal(){cfg.model=document.getElementById('modelSel').value;localStorage.setItem(LOCAL_KEY,JSON.stringify(cfg))}
@@ -228,7 +229,31 @@ async function loadSettingsToUI(){
 async function saveSettings(){
   cfg.base=document.getElementById('cfgBase').value.trim();cfg.apiKey=document.getElementById('cfgKey').value.trim();cfg.apiBase=document.getElementById('cfgApiBase').value.trim();saveLocal();
   try{await api('/api/settings','PUT',{system_prompt:document.getElementById('cfgPrompt').value.trim(),temperature:parseFloat(document.getElementById('cfgTemp').value)||0.7,max_context_rounds:parseInt(document.getElementById('cfgRounds').value)||20})}catch(e){console.error(e)}
-  closeP('settingsOverlay');loadSessions();
+  closeP('settingsOverlay');loadSessions();refreshModels();
+}
+
+async function refreshModels(){
+  const sel=document.getElementById('modelSel');
+  const prev=sel.value||cfg.model||'claude-sonnet-4-6';
+  try{
+    const body={};
+    if(cfg.apiKey)body.api_key=cfg.apiKey;
+    if(cfg.apiBase)body.api_base=cfg.apiBase;
+    const models=await api('/api/models','POST',body);
+    if(models.length){
+      sel.innerHTML=models.map(m=>`<option value="${esc(m.id)}">${esc(m.id)}</option>`).join('');
+      // 恢复之前选的
+      const exists=[...sel.options].some(o=>o.value===prev);
+      sel.value=exists?prev:models[0].id;
+      saveLocal();
+    }
+  }catch(e){
+    console.log('拉取模型列表失败，使用默认:',e.message);
+    if(sel.options.length<=1){
+      sel.innerHTML='<option value="claude-sonnet-4-6">Sonnet 4.6</option><option value="claude-opus-4-6">Opus 4.6</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option>';
+      sel.value=prev;
+    }
+  }
 }
 
 async function loadMemories(){
