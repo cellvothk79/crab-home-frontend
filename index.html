@@ -101,6 +101,16 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
 .send-btn{width:33px;height:33px;flex-shrink:0;border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:.15s}
 .send-btn.on{background:var(--ac);color:#0c0b0e}
 .send-btn.off{background:var(--bd);color:var(--tf);cursor:default}
+/* staged messages */
+.staged-area{padding:5px 9px 0;display:none;flex-direction:column;gap:4px;border-top:1px solid var(--bd);background:var(--s1)}
+.staged-area.show{display:flex}
+.staged-msg{display:flex;align-items:center;gap:7px;background:var(--s2);border:1px solid var(--bd);border-radius:9px;padding:6px 10px;font-size:13px;color:var(--td)}
+.staged-msg span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.staged-del{background:none;border:none;color:var(--tf);cursor:pointer;font-size:14px;flex-shrink:0}
+/* inner thought */
+.inner-btn{background:none;border:none;font-size:12px;cursor:pointer;opacity:.5;padding:2px 4px;margin-top:2px;display:block}
+.inner-btn:hover{opacity:1}
+.inner-thought{background:rgba(212,165,116,.06);border:1px solid rgba(212,165,116,.2);border-radius:8px;padding:7px 10px;font-size:12px;color:var(--td);font-style:italic;margin-top:3px;line-height:1.5;max-width:280px}
 /* mood popup */
 .mood-popup{position:absolute;bottom:55px;right:10px;background:var(--s2);border:1px solid rgba(212,165,116,.3);border-radius:12px;padding:12px 14px;max-width:220px;z-index:50;animation:slideDown .2s ease}
 .mood-popup-label{font-size:10px;color:var(--ac);margin-bottom:6px}
@@ -206,6 +216,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
       <button onclick="sendLink()" style="padding:7px 10px;background:var(--ac);border:none;border-radius:8px;color:#0c0b0e;font-size:12.5px;cursor:pointer">发送</button>
       <button onclick="toggleLink()" style="padding:7px 8px;background:none;border:1px solid var(--bd);border-radius:8px;color:var(--td);font-size:12.5px;cursor:pointer">✕</button>
     </div>
+    <div class="staged-area" id="stagedArea"></div>
     <div class="input-bar" style="position:relative">
       <div id="moodPopup" class="mood-popup" style="display:none">
         <div class="mood-popup-label">💭 当前心声</div>
@@ -214,7 +225,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
       <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="sendImage(event)">
       <button class="ic-btn normal" onclick="document.getElementById('fileInput').click()" title="发图片">📎</button>
       <button class="ic-btn normal" id="linkBtn" onclick="toggleLink()" title="发链接">🔗</button>
-      <textarea class="ta" id="msgInput" placeholder="跟宝宝说话…" rows="1"
+      <textarea class="ta" id="msgInput" placeholder="回车暂存，发送键发出…" rows="1"
         oninput="onInput(this)" onkeydown="handleKey(event)"></textarea>
       <button class="ic-btn normal" id="moodBtn" onclick="toggleMood()" title="他的心声">💭</button>
       <button class="ic-btn normal" id="micBtn" onclick="toggleRec()" title="语音输入">🎤</button>
@@ -245,6 +256,32 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
 </div>
 
 <script>
+// ═══════════ STAGED MESSAGES ═══════════
+let stagedMsgs = [];
+function stageMessage(text){
+  stagedMsgs.push(text);
+  document.getElementById('msgInput').value='';
+  document.getElementById('msgInput').style.height='auto';
+  renderStaged();
+}
+function renderStaged(){
+  const area=document.getElementById('stagedArea');
+  if(!stagedMsgs.length){area.classList.remove('show');area.innerHTML='';return;}
+  area.classList.add('show');
+  area.innerHTML=stagedMsgs.map((m,i)=>`
+    <div class="staged-msg">
+      <span>${esc(m)}</span>
+      <button class="staged-del" onclick="delStaged(${i})">×</button>
+    </div>`).join('');
+  // update send button state
+  const ok=!streaming&&currentSession;
+  const btn=document.getElementById('sendBtn');
+  btn.className='send-btn '+(ok?'on':'off');
+  btn.disabled=!ok;
+}
+function delStaged(i){stagedMsgs.splice(i,1);renderStaged();}
+function clearStaged(){stagedMsgs=[];renderStaged();}
+
 // ═══════════ STORAGE KEYS ═══════════
 const K={msgs:'cc_msgs',cfg:'cc_cfg',mems:'cc_mem',favs:'cc_favs',todos:'cc_todos',annivs:'cc_annivs',diaries:'cc_diaries',sessions:'cc_sessions',moods:'cc_moods'};
 function load(k){try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e){return null}}
@@ -277,10 +314,33 @@ let nowTimer=null;
   updatePresetBtn();
   updateNow();
   nowTimer=setInterval(updateNow,30000);
-  renderSessions();
-  if(sessions.length===0){newSession();}
-  else{currentSession=sessions[0];loadMessages();}
+  // load sessions from backend
+  if(cfg.base){
+    fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions')
+      .then(r=>r.json())
+      .then(data=>{
+        if(data&&data.length){
+          sessions=data;save(K.sessions,sessions);
+          renderSessions();
+          currentSession=sessions[0];loadMessages();
+        } else {
+          renderSessions();
+          if(sessions.length===0)newSession();
+          else{currentSession=sessions[0];loadMessages();}
+        }
+      })
+      .catch(()=>{
+        renderSessions();
+        if(sessions.length===0)newSession();
+        else{currentSession=sessions[0];loadMessages();}
+      });
+  } else {
+    renderSessions();
+    if(sessions.length===0)newSession();
+    else{currentSession=sessions[0];loadMessages();}
+  }
   checkAnnivs();
+  setTimeout(initMic, 100);
   window.addEventListener('click',()=>{document.getElementById('ctxMenu').style.display='none';});
   // check if mobile
   if(window.innerWidth<=600){document.getElementById('sb').classList.remove('show');}
@@ -307,23 +367,102 @@ function renderSessions(){
   const el=document.getElementById('sessList');
   el.innerHTML=sessions.map(s=>`<div class="sb-item${currentSession?.id===s.id?' active':''}" onclick="switchSession('${s.id}')">${esc(s.name)}</div>`).join('');
 }
-function newSession(){
-  const s={id:Date.now().toString(),name:'新对话',createdAt:new Date().toISOString()};
-  sessions.unshift(s);save(K.sessions,sessions);
-  currentSession=s;messages=[];save(K.msgs,[]);
-  renderSessions();renderMessages();hideSb();
+async function newSession(){
+  if(!cfg.base){openPanel('settings');return;}
+  try{
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'新对话'})});
+    const s=await r.json();
+    // s.id is a real bigint from Supabase
+    sessions.unshift(s);save(K.sessions,sessions);
+    currentSession=s;messages=[];
+    renderSessions();renderMessages();hideSb();
+  }catch(e){
+    // fallback to local if backend not available
+    const s={id:Date.now().toString(),name:'新对话',createdAt:new Date().toISOString()};
+    sessions.unshift(s);save(K.sessions,sessions);
+    currentSession=s;messages=[];
+    renderSessions();renderMessages();hideSb();
+  }
 }
-function switchSession(id){
+async function switchSession(id){
   currentSession=sessions.find(s=>s.id===id);
-  const saved=load('cc_msgs_'+id)||[];
-  messages=saved;renderSessions();renderMessages();hideSb();
+  renderSessions();hideSb();
+  if(!cfg.base){
+    messages=load('cc_msgs_'+id)||[];
+    renderMessages();return;
+  }
+  try{
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+id);
+    const data=await r.json();
+    // convert backend messages to frontend format
+    messages=data.map(m=>({
+      id:m.id.toString(),
+      role:m.role,
+      content:m.content,
+      innerThought:m.inner_thought||'',
+      ts:m.created_at,
+      type:m.image_url?'image':'text',
+      imageUrl:m.image_url||null,
+    }));
+    renderMessages();
+  }catch(e){
+    messages=load('cc_msgs_'+id)||[];
+    renderMessages();
+  }
 }
 function saveMessages(){
+  // backend is source of truth; keep local as cache
   if(currentSession)save('cc_msgs_'+currentSession.id,messages);
 }
-function loadMessages(){
-  if(currentSession){messages=load('cc_msgs_'+currentSession.id)||[];}
+async function loadMessages(){
+  if(!currentSession){renderMessages();return;}
+  if(cfg.base){
+    try{
+      const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id);
+      const data=await r.json();
+      messages=data.map(m=>({
+        id:m.id.toString(),
+        role:m.role,
+        content:m.content,
+        innerThought:m.inner_thought||'',
+        ts:m.created_at,
+        type:m.image_url?'image':'text',
+        imageUrl:m.image_url||null,
+      }));
+    }catch(e){
+      messages=load('cc_msgs_'+currentSession.id)||[];
+    }
+  } else {
+    messages=load('cc_msgs_'+currentSession.id)||[];
+  }
   renderMessages();
+  checkDiary();
+}
+function checkDiary(){
+  if(!cfg.base||!currentSession)return;
+  // find last user message time
+  const lastUserMsg=messages.filter(m=>m.role==='user').slice(-1)[0];
+  if(!lastUserMsg)return;
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/diary/check',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      session_id:currentSession.id,
+      last_message_time:lastUserMsg.ts,
+      api_key:cfg.apiKey,
+      api_base:cfg.apiBase,
+      model:cfg.model,
+    })
+  }).then(r=>r.json()).then(data=>{
+    if(data.wrote&&data.diary){
+      // show a subtle notification
+      const notif=document.createElement('div');
+      notif.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(212,165,116,.15);border:1px solid rgba(212,165,116,.3);border-radius:10px;padding:8px 14px;font-size:12px;color:var(--ac);z-index:200;animation:slideDown .3s ease';
+      notif.textContent='📔 他写了一篇日记';
+      document.body.appendChild(notif);
+      setTimeout(()=>notif.remove(),4000);
+    }
+  }).catch(()=>{});
 }
 
 // ═══════════ RENDER ═══════════
@@ -340,7 +479,7 @@ function renderMessages(){
     if(t!==lastTime){html+='<div class="msg-time">'+t+'</div>';lastTime=t;}
     html+=renderMsg(m);
   }
-  el.innerHTML=html;scrollEnd();
+  el.innerHTML=html;if(!selMode)scrollEnd();
 }
 
 function renderMsg(m){
@@ -356,11 +495,15 @@ function renderMsg(m){
   if(m.type==='image')inner=`<img src="${m.imageUrl}" alt="图片">`;
   else inner=`<span style="white-space:pre-wrap">${esc(m.content)}</span>`;
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
+  const innerBtn=(!isU&&m.innerThought)?`<button class="inner-btn" onclick="toggleInner('${m.id}')" title="心声">💭</button>`:'';
+  const innerDiv=(!isU&&m.innerThought)?`<div class="inner-thought" id="inner_${m.id}" style="display:none">${esc(m.innerThought)}</div>`:'';
   return`<div class="msg-row ${isU?'user':'bot'}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
     ${avHtml}
     <div class="msg-col ${isU?'user':'bot'}">
       ${q}
       <div class="bubble ${m.type==='error'?'error':(isU?'user':'bot')}" style="${selCls}${opCls}">${inner}</div>
+      ${innerBtn}
+      ${innerDiv}
     </div>
   </div>`;
 }
@@ -433,31 +576,47 @@ function addTodo(){
 // ═══════════ INPUT ═══════════
 function onInput(el){
   el.style.height='auto';el.style.height=Math.min(el.scrollHeight,90)+'px';
-  const ok=el.value.trim()&&!streaming&&currentSession;
+  const ok=(el.value.trim()||stagedMsgs.length)&&!streaming&&currentSession;
   const btn=document.getElementById('sendBtn');
   btn.className='send-btn '+(ok?'on':'off');
   btn.disabled=!ok;
 }
-function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
+function handleKey(e){
+  if(e.key==='Enter'&&!e.shiftKey){
+    e.preventDefault();
+    const v=document.getElementById('msgInput').value.trim();
+    if(v) stageMessage(v);
+  }
+}
 
 // ═══════════ SEND ═══════════
 async function send(){
   const inp=document.getElementById('msgInput');
   const text=inp.value.trim();
-  if(!text||streaming||!currentSession)return;
+  // collect staged + current input
+  const allTexts=[...stagedMsgs];
+  if(text) allTexts.push(text);
+  if(!allTexts.length||streaming||!currentSession)return;
   if(!cfg.base){openPanel('settings');return;}
   inp.value='';inp.style.height='auto';
+  clearStaged();
   document.getElementById('sendBtn').className='send-btn off';
 
   if(editingId){
-    messages=messages.map(m=>m.id===editingId?{...m,content:text}:m);
+    messages=messages.map(m=>m.id===editingId?{...m,content:allTexts.join('\n')}:m);
     saveMessages();renderMessages();cancelEdit();return;
   }
 
   const q=quoteMsg;clearQuote();
-  const userMsg={id:Date.now().toString(),role:'user',content:text,ts:new Date().toISOString(),type:'text',quote:q?{id:q.id,content:q.content.slice(0,55)}:null};
-  messages.push(userMsg);
+  // add each staged message as separate bubble (optimistic UI)
+  const firstText=allTexts[0];
+  for(let i=0;i<allTexts.length;i++){
+    const userMsg={id:(Date.now()+i).toString(),role:'user',content:allTexts[i],ts:new Date().toISOString(),type:'text',quote:i===0&&q?{id:q.id,content:q.content.slice(0,55)}:null};
+    messages.push(userMsg);
+  }
   saveMessages();renderMessages();
+  // send combined content to backend (backend saves to supabase and queries full history)
+  const combinedContent=allTexts.join('\n---msg---\n');
 
   // check if todo query
   const showTodo=isTodoQuery(text);
@@ -501,14 +660,45 @@ async function send(){
       if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||'HTTP '+r.status);}
       const data=await r.json();reply=data.content||'(空回复)';
     } else {
-      const r=await fetch(apiUrl,{method:'POST',headers,body:JSON.stringify({model:cfg.model,max_tokens:4096,system:systemPrompt||undefined,messages:messages.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role,content:m.content}))})});
+      const r=await fetch(apiUrl,{method:'POST',headers,body:JSON.stringify({model:cfg.model,max_tokens:4096,system:systemPrompt||undefined,messages:messages.filter(m=>m.role==='user'||m.role==='assistant').map(m=>{
+            let content=m.content;
+            if(m.quote&&m.role==='user')content=`[引用: "${m.quote.content}"]\n${content}`;
+            return{role:m.role,content};
+          })})});
       if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||'HTTP '+r.status);}
       const data=await r.json();reply=data.content?.map(b=>b.text||'').join('')||'(空回复)';
     }
 
     hideTyping();
-    const botMsg={id:Date.now().toString(),role:'assistant',content:reply,ts:new Date().toISOString(),type:'text'};
-    messages.push(botMsg);
+    // handle multi-message reply
+    // reload messages from backend to get real data with inner_thought
+    if(cfg.base&&currentSession){
+      try{
+        const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id);
+        const freshMsgs=await r.json();
+        messages=freshMsgs.map(m=>({
+          id:m.id.toString(),
+          role:m.role,
+          content:m.content,
+          innerThought:m.inner_thought||'',
+          ts:m.created_at,
+          type:'text',
+        }));
+      }catch(e){
+        // fallback: add reply locally
+        const replyMsgs=data.messages||[{content:reply,inner:''}];
+        for(let i=0;i<replyMsgs.length;i++){
+          const rm=replyMsgs[i];
+          messages.push({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner,ts:new Date().toISOString(),type:'text'});
+        }
+      }
+    } else {
+      const replyMsgs=data.messages||[{content:reply,inner:''}];
+      for(let i=0;i<replyMsgs.length;i++){
+        const rm=replyMsgs[i];
+        messages.push({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner,ts:new Date().toISOString(),type:'text'});
+      }
+    }
 
     // if todo query, insert todo card
     if(showTodo){
@@ -555,12 +745,17 @@ function hideTyping(){if(typingEl){typingEl.remove();typingEl=null;}}
 function sendImage(e){
   const f=e.target.files[0];if(!f)return;
   const url=URL.createObjectURL(f);
-  const m={id:Date.now().toString(),role:'user',content:'',ts:new Date().toISOString(),type:'image',imageUrl:url};
-  messages.push(m);saveMessages();renderMessages();
+  // convert to base64 for AI
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    const b64=ev.target.result.split(',')[1];
+    const m={id:Date.now().toString(),role:'user',content:'',ts:new Date().toISOString(),type:'image',imageUrl:url,imageBase64:b64,imageMime:f.type||'image/jpeg'};
+    messages.push(m);saveMessages();renderMessages();
+    // stage a prompt so user can add their own text, or just send
+    document.getElementById('msgInput').focus();
+  };
+  reader.readAsDataURL(f);
   e.target.value='';
-  // auto send to AI
-  const inp=document.getElementById('msgInput');
-  inp.value='看看这个图片';send();inp.value='';
 }
 
 // ═══════════ LINK ═══════════
@@ -573,32 +768,65 @@ function toggleLink(){
 }
 function sendLink(){
   const v=document.getElementById('linkInput').value.trim();if(!v)return;
-  document.getElementById('msgInput').value=`读一下这个链接：${v}`;
-  document.getElementById('linkInput').value='';toggleLink();send();
+  // stage the link as a message, let user send when ready
+  stageMessage('🔗 '+v);
+  document.getElementById('linkInput').value='';
+  toggleLink();
+  document.getElementById('msgInput').focus();
 }
 
 // ═══════════ VOICE ═══════════
-function toggleRec(){
+function initMic(){
   const btn=document.getElementById('micBtn');
-  if(recording){
-    clearTimeout(recTimer);recording=false;btn.className='ic-btn normal';
-    // Web Speech API
-    if(window._rec){try{window._rec.stop();}catch(e){}}
-  } else {
-    recording=true;btn.className='ic-btn rec';
-    if('webkitSpeechRecognition' in window||'SpeechRecognition' in window){
-      const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-      const r=new SR();r.lang='zh-CN';r.continuous=false;r.interimResults=false;
-      r.onresult=e=>{const t=e.results[0][0].transcript;const inp=document.getElementById('msgInput');inp.value+=t;onInput(inp);};
-      r.onend=()=>{recording=false;btn.className='ic-btn normal';};
-      r.start();window._rec=r;
-    } else {
-      recTimer=setTimeout(()=>{recording=false;btn.className='ic-btn normal';const inp=document.getElementById('msgInput');inp.value+='（语音识别不可用，请检查浏览器权限）';onInput(inp);},3000);
-    }
-  }
+  if(!btn)return;
+  // detect mobile - hide if speech not supported
+  const isMobile=/Android|iPhone|iPad/i.test(navigator.userAgent);
+  const hasSTT='webkitSpeechRecognition' in window||'SpeechRecognition' in window;
+  if(isMobile&&!hasSTT){btn.style.display='none';return;}
+  if(!hasSTT){btn.title='浏览器不支持语音识别';btn.style.opacity='0.3';return;}
+  // desktop: mousedown=start, mouseup=stop
+  btn.addEventListener('mousedown',startRec);
+  btn.addEventListener('mouseup',stopRec);
+  btn.addEventListener('mouseleave',stopRec);
+  btn.title='按住说话';
+}
+function startRec(){
+  if(recording)return;
+  const btn=document.getElementById('micBtn');
+  recording=true;btn.className='ic-btn rec';
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const r=new SR();r.lang='zh-CN';r.continuous=true;r.interimResults=true;
+  r.onresult=e=>{
+    const inp=document.getElementById('msgInput');
+    const interim=[...e.results].map(r=>r[0].transcript).join('');
+    // show interim result
+    inp.setAttribute('data-base',inp.getAttribute('data-base')||inp.value);
+    inp.value=(inp.getAttribute('data-base')||'')+interim;
+    onInput(inp);
+  };
+  r.onend=()=>{
+    recording=false;
+    const btn=document.getElementById('micBtn');
+    if(btn)btn.className='ic-btn normal';
+    const inp=document.getElementById('msgInput');
+    inp.removeAttribute('data-base');
+  };
+  r.start();window._rec=r;
+}
+function stopRec(){
+  if(!recording)return;
+  if(window._rec){try{window._rec.stop();}catch(e){}}
+}
+function toggleRec(){
+  // kept for compatibility, desktop uses mousedown/mouseup now
+  if(recording)stopRec();else startRec();
 }
 
 // ═══════════ MOOD ═══════════
+function toggleInner(msgId){
+  const el=document.getElementById('inner_'+msgId);
+  if(el)el.style.display=el.style.display==='none'?'block':'none';
+}
 function toggleMood(){
   const popup=document.getElementById('moodPopup');
   const show=popup.style.display==='none';
@@ -745,6 +973,9 @@ function editPreset(i){
       <input class="p-inp" id="pModel" style="margin-bottom:0;flex:1" value="${esc(p.model)}" placeholder="输入或拉取选择">
       <button class="h-btn" onclick="fetchModels(${i})" id="fetchBtn">拉取模型</button>
     </div>
+    <div id="modelSearchWrap" style="display:none;margin-bottom:4px">
+      <input class="p-inp" id="modelSearch" style="margin-bottom:0" placeholder="搜索模型名称..." oninput="filterModels()">
+    </div>
     <div id="modelListEl" class="model-list" style="display:none"></div>
     <button class="p-btn save" onclick="savePreset(${i})" style="margin-top:8px">保存</button>
     ${i>=0?`<button class="h-btn" style="width:100%;margin-top:8px;color:#c46;border-color:#c46" onclick="delPreset(${i})">删除此预设</button>`:''}`;
@@ -762,7 +993,9 @@ async function fetchModels(presetIdx){
     const list=(data.data||data.models||[]).map(m=>typeof m==='string'?m:(m.id||'')).filter(Boolean);
     const el=document.getElementById('modelListEl');
     el.style.display='block';
-    el.innerHTML=list.map(m=>`<div class="model-item${document.getElementById('pModel').value===m?' sel':''}" onclick="document.getElementById('pModel').value='${m}';document.querySelectorAll('.model-item').forEach(x=>x.classList.remove('sel'));this.classList.add('sel')">${m}</div>`).join('');
+    document.getElementById('modelSearchWrap').style.display='block';
+    window._allModels=list;
+    renderModelList(list);
   }catch(e){
     // try backend proxy
     if(cfg.base){
@@ -778,6 +1011,16 @@ async function fetchModels(presetIdx){
   btn.textContent='拉取模型';btn.disabled=false;
 }
 
+function renderModelList(list){
+  const el=document.getElementById('modelListEl');
+  const cur=document.getElementById('pModel')?.value||'';
+  el.innerHTML=list.map(m=>`<div class="model-item${cur===m?' sel':''}" onclick="document.getElementById('pModel').value='${m}';document.querySelectorAll('.model-item').forEach(x=>x.classList.remove('sel'));this.classList.add('sel')">${m}</div>`).join('');
+}
+function filterModels(){
+  const q=document.getElementById('modelSearch')?.value?.toLowerCase()||'';
+  const filtered=(window._allModels||[]).filter(m=>m.toLowerCase().includes(q));
+  renderModelList(filtered);
+}
 function savePreset(i){
   const p={id:i>=0?(cfg.presets[i].id||Date.now().toString()):Date.now().toString(),name:document.getElementById('pName').value.trim(),apiBase:document.getElementById('pBase').value.trim(),apiKey:document.getElementById('pKey').value.trim(),model:document.getElementById('pModel').value.trim()};
   if(!p.name||!p.apiBase||!p.model){alert('请填写名称、API地址和模型');return;}
@@ -813,17 +1056,27 @@ function delFav(i){favs.splice(i,1);save(K.favs,favs);renderPanel('favs');}
 function toggleFavGroup(i){favs[i].collapsed=!favs[i].collapsed;save(K.favs,favs);renderPanel('favs');}
 
 function renderDiaryPanel(){
-  // diaries are messages of type 'diary' from AI, plus mood-cards
-  const diaryMsgs=[];
-  for(const s of sessions){
-    const smsgs=load('cc_msgs_'+s.id)||[];
-    smsgs.filter(m=>m.type==='diary').forEach(m=>diaryMsgs.push({...m,sessName:s.name}));
-  }
-  diaryMsgs.sort((a,b)=>new Date(b.ts)-new Date(a.ts));
-  const items=diaryMsgs.map(m=>`<div class="diary-item"><div style="font-size:10px;color:var(--ac);margin-bottom:4px">📔 ${fmtTime(m.ts)} · ${esc(m.sessName||'')}</div><div style="font-size:12.5px;line-height:1.6;font-style:italic">${esc(m.content)}</div></div>`).join('');
-  return`<div class="panel-hdr"><span class="panel-title">日记</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+  const el=document.getElementById('panelContent');
+  el.innerHTML=`<div class="panel-hdr"><span class="panel-title">日记</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
     <p style="font-size:11px;color:var(--td);margin-bottom:10px">这里是他自己写的日记，你只能看，不能改 ✨</p>
-    ${items||'<p style="font-size:12px;color:var(--tf);text-align:center;padding:20px 0">还没有日记，多聊聊他可能会写</p>'}`;
+    <div id="diaryList"><div style="text-align:center;color:var(--tf);font-size:12px;padding:20px">加载中...</div></div>`;
+  if(!cfg.base)return;
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/diary')
+    .then(r=>r.json())
+    .then(data=>{
+      const list=document.getElementById('diaryList');
+      if(!list)return;
+      if(!data.length){list.innerHTML='<p style="font-size:12px;color:var(--tf);text-align:center;padding:20px 0">还没有日记，多聊聊他可能会写</p>';return;}
+      list.innerHTML=data.map(d=>`<div class="diary-item">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+          <span style="font-size:12.5px;font-weight:500;color:var(--ac)">${esc(d.title||'无题')}</span>
+          <span style="font-size:10px;color:var(--tf)">${fmtTime(d.created_at)}${d.mood?' · '+esc(d.mood):''}</span>
+        </div>
+        <div style="font-size:12.5px;line-height:1.6;color:var(--t);font-style:italic">${esc(d.content)}</div>
+      </div>`).join('');
+    })
+    .catch(()=>{const list=document.getElementById('diaryList');if(list)list.innerHTML='<p style="color:#c46;font-size:12px;text-align:center">加载失败</p>';});
+  return '';
 }
 
 function renderSettingsPanel(){
@@ -846,7 +1099,17 @@ function renderSettingsPanel(){
     </div>`;
 }
 function toggleCfg(key){cfg[key]=!cfg[key];save(K.cfg,cfg);renderPanel('settings');}
-function saveCfgSettings(){cfg.base=document.getElementById('cfgBase').value.trim();cfg.systemPrompt=document.getElementById('cfgPrompt').value.trim();save(K.cfg,cfg);closePanel();}
+function saveCfgSettings(){
+  cfg.base=document.getElementById('cfgBase').value.trim();
+  cfg.systemPrompt=document.getElementById('cfgPrompt').value.trim();
+  save(K.cfg,cfg);
+  // sync system prompt to backend
+  if(cfg.base){
+    fetch(cfg.base.replace(/\/+$/,'')+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_prompt:cfg.systemPrompt})})
+      .catch(e=>console.error('同步设置失败:',e));
+  }
+  closePanel();
+}
 function addAnniv(){const n=document.getElementById('annivName').value.trim(),d=document.getElementById('annivDate').value.trim();if(!n||!d)return;annivs.push({id:Date.now().toString(),name:n,date:d});save(K.annivs,annivs);renderPanel('settings');}
 function delAnniv(i){annivs.splice(i,1);save(K.annivs,annivs);renderPanel('settings');}
 
