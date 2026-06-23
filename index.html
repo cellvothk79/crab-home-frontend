@@ -329,13 +329,15 @@ function loadMessages(){
 // ═══════════ RENDER ═══════════
 function renderMessages(){
   const el=document.getElementById('msgs');
-  const empty=document.getElementById('emptyState');
-  if(!messages.length){el.innerHTML='';el.appendChild(empty);empty.style.display='flex';return;}
-  empty.style.display='none';
+  if(!el)return;
+  if(!messages.length){
+    el.innerHTML='<div class="empty"><div class="empty-crabs">🦀 🦀</div><div style="font-size:11px">两只小螃蟹的家<br>新建对话开始聊天</div></div>';
+    return;
+  }
   let html='';let lastTime='';
   for(const m of messages){
     const t=fmtTime(m.ts);
-    if(t!==lastTime){html+=`<div class="msg-time">${t}</div>`;lastTime=t;}
+    if(t!==lastTime){html+='<div class="msg-time">'+t+'</div>';lastTime=t;}
     html+=renderMsg(m);
   }
   el.innerHTML=html;scrollEnd();
