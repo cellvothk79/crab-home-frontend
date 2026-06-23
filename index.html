@@ -22,6 +22,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
 .sb-list{flex:1;overflow-y:auto;padding:5px}.sb-list::-webkit-scrollbar{display:none}
 .sb-item{padding:8px 10px;border-radius:8px;cursor:pointer;font-size:12.5px;color:var(--td);margin-bottom:2px;transition:.1s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sb-item.active{background:var(--s2);color:var(--t)}
+.sb-item:hover .sess-del,.sb-item.active .sess-del{display:block!important}
 .sb-bot{padding:7px;border-top:1px solid var(--bd);display:grid;grid-template-columns:1fr 1fr;gap:4px}
 .sb-btn{padding:6px 2px;background:var(--s2);border:1px solid var(--bd);color:var(--td);border-radius:7px;font-size:10px;cursor:pointer;font-family:var(--f)}
 /* main */
@@ -365,7 +366,10 @@ function hideSb(){document.getElementById('sb').classList.remove('show');documen
 // ═══════════ SESSIONS ═══════════
 function renderSessions(){
   const el=document.getElementById('sessList');
-  el.innerHTML=sessions.map(s=>`<div class="sb-item${currentSession?.id===s.id?' active':''}" onclick="switchSession('${s.id}')">${esc(s.name)}</div>`).join('');
+  el.innerHTML=sessions.map(s=>`<div class="sb-item${currentSession?.id===s.id?' active':''}" onclick="switchSession('${s.id}')">
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.name)}</span>
+      <button onclick="event.stopPropagation();deleteSession('${s.id}')" style="background:none;border:none;color:var(--tf);font-size:14px;cursor:pointer;padding:0 2px;display:none" class="sess-del">×</button>
+    </div>`).join('');
 }
 async function newSession(){
   if(!cfg.base){openPanel('settings');return;}
@@ -383,6 +387,21 @@ async function newSession(){
     currentSession=s;messages=[];
     renderSessions();renderMessages();hideSb();
   }
+}
+async function deleteSession(id){
+  if(!confirm('删除这个对话？'))return;
+  if(cfg.base){
+    try{await fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions/'+id,{method:'DELETE'});}catch(e){}
+  }
+  sessions=sessions.filter(s=>s.id!=id);
+  save(K.sessions,sessions);
+  if(currentSession?.id==id){
+    currentSession=sessions[0]||null;
+    messages=[];
+    if(currentSession)loadMessages();
+    else renderMessages();
+  }
+  renderSessions();
 }
 async function switchSession(id){
   currentSession=sessions.find(s=>s.id===id);
