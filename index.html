@@ -187,7 +187,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
         <button class="menu-btn" onclick="toggleSb()">☰</button>
         <div style="display:flex;flex-direction:column;gap:1px">
           <span class="hdr-title">🦀 我们的家</span>
-          <span id="headerMood" onclick="refreshHeaderMood()" style="font-size:10px;color:var(--ac);cursor:pointer;opacity:.8;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+          <span id="headerMood" onclick="generateMood()" style="font-size:10px;color:var(--ac);cursor:pointer;opacity:.8;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="点击生成此刻心声">💭 点击感受他的心声</span>
         </div>
       </div>
       <button class="preset-btn" id="presetBtn" onclick="openPanel('preset')">加载中...</button>
@@ -314,7 +314,6 @@ let nowTimer=null;
   // single conversation mode - get or create the one session
   initSingleSession();
   checkAnnivs();
-  setTimeout(refreshHeaderMood, 500);
   window.addEventListener('click',()=>{document.getElementById('ctxMenu').style.display='none';});
   // check if mobile
   if(window.innerWidth<=600){document.getElementById('sb').classList.remove('show');}
@@ -836,27 +835,30 @@ function sendLink(){
 
 
 // ═══════════ MOOD ═══════════
-function refreshHeaderMood(){
+async function generateMood(){
   const el=document.getElementById('headerMood');
-  if(!el)return;
-  if(!cfg.base){
-    if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}
-    return;
+  if(!el||!cfg.base||!currentSession)return;
+  el.textContent='💭 感受中...';
+  try{
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/generate',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:currentSession.id})
+    });
+    const d=await r.json();
+    if(d.mood)el.textContent='💭 '+d.mood;
+    else el.textContent='💭 点击感受他的心声';
+  }catch(e){
+    el.textContent='💭 点击感受他的心声';
   }
-  fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/random')
-    .then(r=>r.json())
-    .then(d=>{if(d.mood)el.textContent='💭 '+d.mood;})
-    .catch(()=>{if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}});
+}
+function refreshHeaderMood(){
+  // 已改为按需生成，页面加载时只显示提示文字，不自动调用 API
+  const el=document.getElementById('headerMood');
+  if(el)el.textContent='💭 点击感受他的心声';
 }
 function updateHeaderMoodFromReply(){
-  const el=document.getElementById('headerMood');
-  if(!el||!cfg.base)return;
-  setTimeout(()=>{
-    fetch(cfg.base.replace(/\/+$/,'')+'/api/mood')
-      .then(r=>r.json())
-      .then(d=>{if(d.mood)el.textContent='💭 '+d.mood;})
-      .catch(()=>{});
-  },1500);
+  // 已改为按需生成，回复后不自动更新心声
 }
 function toggleInner(msgId){
   const el=document.getElementById('inner_'+msgId);
