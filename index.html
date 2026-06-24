@@ -840,16 +840,19 @@ function sendLink(){
 // ═══════════ VOICE ═══════════
 function initMic(){
   const btn=document.getElementById('micBtn');
-  if(!btn)return;
+  if(!btn){console.log('[mic] 按钮元素不存在');return;}
   const hasSTT='webkitSpeechRecognition' in window||'SpeechRecognition' in window;
   const isMobile=/Android|iPhone|iPad/i.test(navigator.userAgent);
-  // only show if enabled in settings AND supported
+  console.log('[mic] voiceEnabled:',cfg.voiceEnabled,'hasSTT:',hasSTT,'isMobile:',isMobile);
   if(!cfg.voiceEnabled||!hasSTT||isMobile){btn.style.display='none';return;}
   btn.style.display='flex';
+  if(btn.dataset.micInited)return;
+  btn.dataset.micInited='1';
   btn.addEventListener('mousedown',startRec);
   btn.addEventListener('mouseup',stopRec);
   btn.addEventListener('mouseleave',stopRec);
   btn.title='按住说话';
+  console.log('[mic] 按钮已显示');
 }
 function startRec(){
   if(recording)return;
