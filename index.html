@@ -1280,8 +1280,16 @@ function toggleFavGroup(i){favs[i].collapsed=!favs[i].collapsed;save(K.favs,favs
 function renderDiaryPanel(){
   const el=document.getElementById('panelContent');
   el.innerHTML=`<div class="panel-hdr"><span class="panel-title">日记</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-    <p style="font-size:11px;color:var(--td);margin-bottom:10px">这里是他自己写的日记，你只能看，不能改 ✨</p>
+    <p style="font-size:11px;color:var(--td);margin-bottom:8px">这里是他自己写的日记，你只能看，不能改 ✨</p>
+    <button class="p-btn ghost" onclick="forceDiary()" style="margin-bottom:10px">📔 立即生成日记</button>
+    <div id="diaryStatus" style="font-size:11px;color:var(--td);margin-bottom:8px;min-height:14px"></div>
     <div id="diaryList"><div style="text-align:center;color:var(--tf);font-size:12px;padding:20px">加载中...</div></div>`;
+  if(!cfg.base)return;
+  loadDiaryList();
+  return '';
+}
+
+function loadDiaryList(){
   if(!cfg.base)return;
   fetch(cfg.base.replace(/\/+$/,'')+'/api/diary')
     .then(r=>r.json())
@@ -1298,7 +1306,37 @@ function renderDiaryPanel(){
       </div>`).join('');
     })
     .catch(()=>{const list=document.getElementById('diaryList');if(list)list.innerHTML='<p style="color:#c46;font-size:12px;text-align:center">加载失败</p>';});
-  return '';
+}
+
+async function forceDiary(){
+  if(!cfg.base||!currentSession){alert('需要先连接后端并开始对话');return;}
+  const status=document.getElementById('diaryStatus');
+  const btn=document.querySelector('#panelContent .p-btn.ghost');
+  if(status)status.textContent='⏳ 生成中...';
+  if(btn)btn.disabled=true;
+  try{
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/diary/force',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        session_id:currentSession.id,
+        api_key:cfg.apiKey,
+        api_base:cfg.apiBase,
+        model:cfg.model,
+      })
+    });
+    const data=await r.json();
+    if(data.wrote){
+      if(status)status.textContent='✅ 写好了！';
+      loadDiaryList();
+    } else {
+      if(status)status.textContent='💭 他觉得今天没什么特别值得记录的（reason: '+(data.reason||data.error||'无')+')';
+    }
+  }catch(e){
+    if(status)status.textContent='❌ 出错了: '+e.message;
+  }finally{
+    if(btn)btn.disabled=false;
+  }
 }
 
 function renderSettingsPanel(){
