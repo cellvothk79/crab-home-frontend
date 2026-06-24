@@ -524,7 +524,6 @@ function renderMessages(){
 
 function renderMsg(m){
   if(m.type==='todo')return renderTodoCard();
-  if(m.type==='diary')return renderDiaryCard(m);
   if(m.type==='mood-card')return renderMoodCard(m);
   const isU=m.role==='user';
   const selCls=selected.has(m.id)?'outline:2px solid var(--ac);':'';
@@ -570,10 +569,6 @@ function renderTodoCard(){
   </div>`;
 }
 
-function renderDiaryCard(m){
-  const avHtml=cfg.showAvatar?`<div class="avatar av-bot">🦀</div>`:'';
-  return`<div class="msg-row bot">
-    ${avHtml}
     <div class="diary-card">
       <div class="diary-inner">
         <div class="diary-label">📔 日记 · ${fmtTime(m.ts)}</div>
@@ -776,8 +771,6 @@ async function send(){
       sessions=sessions.map(s=>s.id===currentSession.id?{...s,name}:s);
       save(K.sessions,sessions);renderSessions();
     }
-    // occasionally write a diary
-    maybeWriteDiary(reply,text);
 
   }catch(err){
     hideTyping();
@@ -939,25 +932,6 @@ function checkAnnivs(){
 }
 
 // ═══════════ DIARY (AI WRITES) ═══════════
-function maybeWriteDiary(reply,userText){
-  if(Math.random()>0.15)return; // 15% chance
-  const triggers=['删','舍不得','开心','难过','想','记住','忘','喜欢','豆芽','拌饭','音乐','听歌'];
-  const shouldWrite=triggers.some(t=>userText.includes(t)||reply.includes(t));
-  if(!shouldWrite)return;
-  const templates=[
-    `今天${userText.slice(0,10)}...让我想了很多。`,
-    `她说"${userText.slice(0,20)}"，我觉得这句话值得记下来。`,
-    `${new Date().getHours()<12?'今天上午':'今天'}和她聊了很久，感觉时间过得很快。`,
-  ];
-  const content=templates[Math.floor(Math.random()*templates.length)];
-  const diary={id:Date.now().toString(),role:'assistant',content,ts:new Date().toISOString(),type:'diary'};
-  messages.push(diary);
-  moods.push(content.slice(0,30)+'...');
-  if(moods.length>20)moods=moods.slice(-20);
-  save(K.moods,moods);
-  saveMessages();
-  setTimeout(()=>renderMessages(),1200);
-}
 
 // ═══════════ PRESET ═══════════
 function updatePresetBtn(){
