@@ -196,6 +196,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
       <span id="selCount">已选 0 条</span>
       <div style="display:flex;gap:6px">
         <button class="h-btn" style="color:var(--ac)" onclick="collectGroup()">打包收藏</button>
+        <button class="h-btn" style="color:#c46" onclick="deleteSelected()">删除</button>
         <button class="h-btn" onclick="cancelSel()">取消</button>
       </div>
     </div>
@@ -500,7 +501,7 @@ async function loadMoreMessages(){
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=200&offset='+(window._msgOffset||200));
     const data=await r.json();
-    if(!data.length){if(btn)btn.style.display='none';return;}
+    if(!data.length){if(btn){btn.textContent='没有更早的消息了';btn.disabled=true;}return;}
     const older=data.map(m=>({
       id:m.id.toString(),
       role:m.role,
@@ -512,13 +513,18 @@ async function loadMoreMessages(){
     }));
     messages=[...older,...messages];
     window._msgOffset=(window._msgOffset||200)+data.length;
-    if(data.length<200&&btn)btn.style.display='none';
-    renderMessages();
-    // 保持滚动位置不跳
+    if(data.length<200&&btn){btn.textContent='没有更早的消息了';btn.disabled=true;}
+    // 记录当前滚动高度，加载后恢复位置
     const box=document.getElementById('chatBox');
-    if(box)box.scrollTop=300;
+    const oldHeight=box?box.scrollHeight:0;
+    renderMessages();
+    if(box){
+      // 新内容插入顶部，滚动位置补偿新增高度
+      box.scrollTop=box.scrollHeight-oldHeight;
+    }
+    if(btn&&!btn.disabled)btn.textContent='加载更早的消息';
   }catch(e){
-    if(btn)btn.textContent='加载更多';
+    if(btn)btn.textContent='加载更早的消息';
   }
 }
 function checkDiary(){
@@ -977,6 +983,21 @@ function updateSelBar(){
   document.getElementById('selCount').textContent=`已选 ${selected.size} 条`;
 }
 function cancelSel(){selMode=false;selected=new Set();updateSelBar();renderMessages();}
+async function deleteSelected(){
+  if(!selected.size)return;
+  if(!confirm(`删除选中的 ${selected.size} 条消息？`))return;
+  const ids=[...selected];
+  // 后端批量删除
+  if(cfg.base){
+    await Promise.all(ids.map(id=>
+      fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+id,{method:'DELETE'}).catch(()=>{})
+    ));
+  }
+  messages=messages.filter(m=>!ids.includes(m.id));
+  saveMessages();
+  selMode=false;selected=new Set();
+  updateSelBar();renderMessages();
+}
 function collectGroup(){
   const title=prompt('给这组收藏起个名字：','聊天记录')||'聊天记录';
   favs.push({type:'group',title,collapsed:true,msgs:messages.filter(m=>selected.has(m.id)),savedAt:new Date().toISOString()});
