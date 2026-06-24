@@ -547,15 +547,13 @@ function renderMsg(m){
   if(m.type==='image')inner=`<img src="${m.imageUrl}" alt="图片">`;
   else inner=`<span style="white-space:pre-wrap">${esc(m.content)}</span>`;
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
-  const innerBtn=(!isU&&m.innerThought)?`<button class="inner-btn" onclick="toggleInner('${m.id}')" title="心声">💭</button>`:'';
-  const innerDiv=(!isU&&m.innerThought)?`<div class="inner-thought" id="inner_${m.id}" style="display:none">${esc(m.innerThought)}</div>`:'';
+
+
   return`<div class="msg-row ${isU?'user':'bot'}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
     ${avHtml}
     <div class="msg-col ${isU?'user':'bot'}">
       ${q}
       <div class="bubble ${m.type==='error'?'error':(isU?'user':'bot')}" style="${selCls}${opCls}">${inner}</div>
-      ${innerBtn}
-      ${innerDiv}
     </div>
   </div>`;
 }
@@ -862,10 +860,6 @@ function refreshHeaderMood(){
 function updateHeaderMoodFromReply(){
   // 已改为按需生成，回复后不自动更新心声
 }
-function toggleInner(msgId){
-  const el=document.getElementById('inner_'+msgId);
-  if(el)el.style.display=el.style.display==='none'?'block':'none';
-}
 function toggleMood(){
   const popup=document.getElementById('moodPopup');
   const show=popup.style.display==='none';
@@ -920,12 +914,7 @@ async function showInnerThought(m){
   const popup=document.getElementById('innerPopup');
   const text=document.getElementById('innerPopupText');
   popup.style.display='flex';
-  // 已有心声直接展示
-  if(m.innerThought){
-    text.textContent=m.innerThought;
-    return;
-  }
-  // 现场生成
+  // 每次都现场生成，不展示 AI 回复时附带的 inner_thought
   text.innerHTML='<span style="opacity:.5">感受中...</span>';
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/generate',{
