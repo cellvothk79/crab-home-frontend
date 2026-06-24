@@ -569,15 +569,6 @@ function renderTodoCard(){
   </div>`;
 }
 
-    <div class="diary-card">
-      <div class="diary-inner">
-        <div class="diary-label">📔 日记 · ${fmtTime(m.ts)}</div>
-        <div class="diary-text">${esc(m.content)}</div>
-      </div>
-    </div>
-  </div>`;
-}
-
 function renderMoodCard(m){
   const avHtml=cfg.showAvatar?`<div class="avatar av-bot">🦀</div>`:'';
   return`<div class="msg-row bot">
