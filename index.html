@@ -187,7 +187,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
         <button class="menu-btn" onclick="toggleSb()">☰</button>
         <div style="display:flex;flex-direction:column;gap:1px">
           <span class="hdr-title">🦀 我们的家</span>
-          <span id="headerMood" onclick="generateMood()" style="font-size:10px;color:var(--ac);cursor:pointer;opacity:.8;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="点击生成此刻心声">💭 点击感受他的心声</span>
+          <span id="headerMood" onclick="refreshHeaderMood()" style="font-size:10px;color:var(--ac);cursor:pointer;opacity:.8;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="点击换一条">💭 此刻状态</span>
         </div>
       </div>
       <button class="preset-btn" id="presetBtn" onclick="openPanel('preset')">加载中...</button>
@@ -242,9 +242,19 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
   <button class="ctx-item" id="ctxEdit" style="color:var(--t)" onclick="ctxAct('edit')">✏ 重新编辑</button>
   <button class="ctx-item" style="color:var(--t)" onclick="ctxAct('quote')">💬 引用</button>
   <button class="ctx-item" style="color:var(--t)" onclick="ctxAct('copy')">📋 复制</button>
+  <button class="ctx-item" id="ctxInner" style="color:var(--ac)" onclick="ctxAct('inner')">💭 心声</button>
   <button class="ctx-item" style="color:var(--t)" onclick="ctxAct('collect')">⭐ 单条收藏</button>
   <button class="ctx-item" style="color:var(--t)" onclick="ctxAct('select')">☑ 多选收藏</button>
   <button class="ctx-item" style="color:#c46" onclick="ctxAct('delete')">🗑 删除</button>
+</div>
+
+<!-- 心声弹窗 -->
+<div id="innerPopup" style="display:none;position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.6);align-items:center;justify-content:center">
+  <div style="background:var(--s2);border:1px solid rgba(212,165,116,.3);border-radius:14px;padding:18px 16px;max-width:280px;width:90%;position:relative">
+    <div style="font-size:11px;color:var(--ac);margin-bottom:10px">💭 此刻心声</div>
+    <div id="innerPopupText" style="font-size:13.5px;line-height:1.7;color:var(--t);font-style:italic;min-height:40px"></div>
+    <button onclick="document.getElementById('innerPopup').style.display='none'" style="margin-top:14px;width:100%;padding:8px;background:var(--acl);border:1px solid var(--acb);border-radius:8px;color:var(--ac);font-size:13px;cursor:pointer">关闭</button>
+  </div>
 </div>
 
 <!-- Anniv alert -->
@@ -314,6 +324,7 @@ let nowTimer=null;
   // single conversation mode - get or create the one session
   initSingleSession();
   checkAnnivs();
+  setTimeout(refreshHeaderMood, 500);
   window.addEventListener('click',()=>{document.getElementById('ctxMenu').style.display='none';});
   // check if mobile
   if(window.innerWidth<=600){document.getElementById('sb').classList.remove('show');}
@@ -837,9 +848,16 @@ async function generateMood(){
   }
 }
 function refreshHeaderMood(){
-  // 已改为按需生成，页面加载时只显示提示文字，不自动调用 API
   const el=document.getElementById('headerMood');
-  if(el)el.textContent='💭 点击感受他的心声';
+  if(!el)return;
+  if(!cfg.base){
+    if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}
+    return;
+  }
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/random')
+    .then(r=>r.json())
+    .then(d=>{if(d.mood)el.textContent='💭 '+d.mood;})
+    .catch(()=>{if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}});
 }
 function updateHeaderMoodFromReply(){
   // 已改为按需生成，回复后不自动更新心声
@@ -879,10 +897,12 @@ function onCtx(e,msgId){
   ctxMsgId=msgId;
   const m=messages.find(m=>m.id===msgId);
   document.getElementById('ctxEdit').style.display=m?.role==='user'?'block':'none';
+  // 心声只对 AI 消息显示
+  document.getElementById('ctxInner').style.display=m?.role==='assistant'?'block':'none';
   const menu=document.getElementById('ctxMenu');
   menu.style.display='block';
   menu.style.left=Math.min(e.clientX-8,window.innerWidth-140)+'px';
-  menu.style.top=Math.min(e.clientY-8,window.innerHeight-220)+'px';
+  menu.style.top=Math.min(e.clientY-8,window.innerHeight-260)+'px';
 }
 function ctxAct(action){
   const m=messages.find(m=>m.id===ctxMsgId);
@@ -894,6 +914,36 @@ function ctxAct(action){
   if(action==='quote'){quoteMsg=m;document.getElementById('quoteBanner').style.display='flex';document.getElementById('quoteText').textContent='引用: '+m.content.slice(0,50);document.getElementById('msgInput').focus();}
   if(action==='collect'){favs.push({type:'single',msg:{...m,savedAt:new Date().toISOString()}});save(K.favs,favs);}
   if(action==='select'){selMode=true;selected=new Set([m.id]);updateSelBar();renderMessages();}
+  if(action==='inner'){showInnerThought(m);}
+}
+async function showInnerThought(m){
+  const popup=document.getElementById('innerPopup');
+  const text=document.getElementById('innerPopupText');
+  popup.style.display='flex';
+  // 已有心声直接展示
+  if(m.innerThought){
+    text.textContent=m.innerThought;
+    return;
+  }
+  // 现场生成
+  text.innerHTML='<span style="opacity:.5">感受中...</span>';
+  try{
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/generate',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:currentSession?.id,content:m.content})
+    });
+    const d=await r.json();
+    if(d.mood){
+      text.textContent=d.mood;
+      // 缓存到消息对象，下次不用重复生成
+      m.innerThought=d.mood;
+    } else {
+      text.textContent='他此刻什么都没想...';
+    }
+  }catch(e){
+    text.textContent='生成失败，稍后再试';
+  }
 }
 function onMsgClick(id){if(selMode){selected.has(id)?selected.delete(id):selected.add(id);updateSelBar();renderMessages();}}
 function updateSelBar(){
