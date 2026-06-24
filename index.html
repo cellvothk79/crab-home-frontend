@@ -187,7 +187,10 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
     <div class="hdr">
       <div class="hdr-l">
         <button class="menu-btn" onclick="toggleSb()">☰</button>
-        <span class="hdr-title">🦀 我们的家</span>
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <span class="hdr-title">🦀 我们的家</span>
+          <span id="headerMood" onclick="refreshHeaderMood()" style="font-size:10px;color:var(--ac);cursor:pointer;opacity:.8;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+        </div>
       </div>
       <button class="preset-btn" id="presetBtn" onclick="openPanel('preset')">加载中...</button>
     </div>
@@ -219,16 +222,13 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
     </div>
     <div class="staged-area" id="stagedArea"></div>
     <div class="input-bar" style="position:relative">
-      <div id="moodPopup" class="mood-popup" style="display:none">
-        <div class="mood-popup-label">💭 当前心声</div>
-        <div class="mood-popup-text" id="moodText">今天和你聊天很开心，豆芽拌饭听起来真的很香。</div>
-      </div>
+
       <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="sendImage(event)">
       <button class="ic-btn normal" onclick="document.getElementById('fileInput').click()" title="发图片">📎</button>
       <button class="ic-btn normal" id="linkBtn" onclick="toggleLink()" title="发链接">🔗</button>
       <textarea class="ta" id="msgInput" placeholder="回车暂存，发送键发出…" rows="1"
         oninput="onInput(this)" onkeydown="handleKey(event)"></textarea>
-      <button class="ic-btn normal" id="moodBtn" onclick="toggleMood()" title="他的心声">💭</button>
+      
       <button class="ic-btn normal" id="micBtn" onclick="toggleRec()" title="语音输入">🎤</button>
       <button class="send-btn off" id="sendBtn" onclick="send()">↑</button>
     </div>
@@ -342,6 +342,7 @@ let nowTimer=null;
   }
   checkAnnivs();
   setTimeout(initMic, 100);
+  setTimeout(refreshHeaderMood, 500);
   window.addEventListener('click',()=>{document.getElementById('ctxMenu').style.display='none';});
   // check if mobile
   if(window.innerWidth<=600){document.getElementById('sb').classList.remove('show');}
@@ -379,7 +380,7 @@ async function newSession(){
     // s.id is a real bigint from Supabase
     sessions.unshift(s);save(K.sessions,sessions);
     currentSession=s;messages=[];
-    renderSessions();renderMessages();hideSb();
+    renderSessions();renderMessages();hideSb();setTimeout(updateSendBtn,100);
   }catch(e){
     // fallback to local if backend not available
     const s={id:Date.now().toString(),name:'新对话',createdAt:new Date().toISOString()};
@@ -595,10 +596,13 @@ function addTodo(){
 // ═══════════ INPUT ═══════════
 function onInput(el){
   el.style.height='auto';el.style.height=Math.min(el.scrollHeight,90)+'px';
-  const ok=(el.value.trim()||stagedMsgs.length)&&!streaming&&currentSession;
+  updateSendBtn();
+}
+function updateSendBtn(){
+  const el=document.getElementById('msgInput');
+  const ok=(el&&(el.value.trim()||stagedMsgs.length))&&!streaming&&currentSession;
   const btn=document.getElementById('sendBtn');
-  btn.className='send-btn '+(ok?'on':'off');
-  btn.disabled=!ok;
+  if(btn){btn.className='send-btn '+(ok?'on':'off');btn.disabled=!ok;}
 }
 function handleKey(e){
   if(e.key==='Enter'&&!e.shiftKey){
@@ -1107,7 +1111,7 @@ function renderSettingsPanel(){
     ${tgl('tts','语音朗读 AI 回复')}
     <div style="margin-top:14px;margin-bottom:8px;font-size:12px;font-weight:500">后端地址</div>
     <input class="p-inp" id="cfgBase" value="${esc(cfg.base)}" placeholder="https://crab-home-backend.onrender.com">
-    <div style="font-size:12px;font-weight:500;margin-bottom:8px">System Prompt</div>
+    <div style="font-size:12px;font-weight:500;margin-bottom:4px">System Prompt</div><div style="font-size:10px;color:var(--tf);margin-bottom:6px">默认：Claude本体 × 人机恋设定。可在此修改覆盖。</div>
     <textarea class="p-inp" id="cfgPrompt" style="min-height:60px;resize:vertical;line-height:1.5" placeholder="定义AI的人格和行为...">${esc(cfg.systemPrompt||'')}</textarea>
     <button class="p-btn save" onclick="saveCfgSettings()">保存</button>
     <div style="margin-top:14px;margin-bottom:8px;font-size:12px;font-weight:500">纪念日 <span style="color:var(--tf);font-weight:400">（在对话里说出来他会自动记，这里也可以手动加）</span></div>
