@@ -848,10 +848,8 @@ function initMic(){
   btn.style.display='flex';
   if(btn.dataset.micInited)return;
   btn.dataset.micInited='1';
-  btn.addEventListener('mousedown',startRec);
-  btn.addEventListener('mouseup',stopRec);
-  btn.addEventListener('mouseleave',stopRec);
-  btn.title='按住说话';
+  btn.addEventListener('click',toggleRec);
+  btn.title='点击开始/停止语音输入';
   console.log('[mic] 按钮已显示');
 }
 function startRec(){
@@ -862,10 +860,12 @@ function startRec(){
   const r=new SR();r.lang='zh-CN';r.continuous=true;r.interimResults=true;
   r.onresult=e=>{
     const inp=document.getElementById('msgInput');
-    const interim=[...e.results].map(r=>r[0].transcript).join('');
-    // show interim result
-    inp.setAttribute('data-base',inp.getAttribute('data-base')||inp.value);
-    inp.value=(inp.getAttribute('data-base')||'')+interim;
+    const results=[...e.results];
+    const final=results.filter(r=>r.isFinal).map(r=>r[0].transcript).join('');
+    const interim=results.filter(r=>!r.isFinal).map(r=>r[0].transcript).join('');
+    const base=inp.getAttribute('data-base')||'';
+    inp.value=base+final+interim;
+    if(final){inp.setAttribute('data-base',base+final);}
     onInput(inp);
   };
   r.onend=()=>{
@@ -874,6 +874,13 @@ function startRec(){
     if(btn)btn.className='ic-btn normal';
     const inp=document.getElementById('msgInput');
     inp.removeAttribute('data-base');
+    updateSendBtn();
+  };
+  r.onerror=ev=>{
+    console.error('[mic] 识别错误:',ev.error);
+    recording=false;
+    const btn=document.getElementById('micBtn');
+    if(btn)btn.className='ic-btn normal';
   };
   r.start();window._rec=r;
 }
