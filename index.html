@@ -170,12 +170,10 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
   <div class="sb" id="sb">
     <div class="sb-hdr">
       <div class="sb-hdr-top">
-        <span class="sb-title">🦀🦀 对话</span>
-        <button class="sb-new" onclick="newSession()">+ 新对话</button>
+        <span class="sb-title">🦀🦀 我们的家</span>
       </div>
       <div class="sb-time" id="sbTime"></div>
     </div>
-    <div class="sb-list" id="sessList"></div>
     <div class="sb-bot">
       <button class="sb-btn" onclick="openPanel('memory')">记忆</button>
       <button class="sb-btn" onclick="openPanel('favs')">收藏</button>
@@ -229,7 +227,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
       <textarea class="ta" id="msgInput" placeholder="回车暂存，发送键发出…" rows="1"
         oninput="onInput(this)" onkeydown="handleKey(event)"></textarea>
       
-      <button class="ic-btn normal" id="micBtn" onclick="toggleRec()" title="语音输入">🎤</button>
+      <button class="ic-btn normal" id="micBtn" onclick="toggleRec()" title="语音输入" style="display:none">🎤</button>
       <button class="send-btn off" id="sendBtn" onclick="send()">↑</button>
     </div>
   </div>
@@ -289,7 +287,7 @@ function load(k){try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e)
 function save(k,v){localStorage.setItem(k,JSON.stringify(v))}
 
 // ═══════════ STATE ═══════════
-let cfg=Object.assign({base:'',apiKey:'',apiBase:'',model:'claude-sonnet-4-6',showAvatar:true,tts:false,presets:[{id:1,name:'中转站',apiBase:'https://api.jiushi.xin/v1',apiKey:'',model:'[按量]claude-sonnet-4-6'},{id:2,name:'官方API',apiBase:'https://api.anthropic.com',apiKey:'',model:'claude-sonnet-4-6'}]},load(K.cfg)||{});
+let cfg=Object.assign({base:'',apiKey:'',apiBase:'',model:'claude-sonnet-4-6',showAvatar:true,tts:false,voiceEnabled:false,presets:[{id:1,name:'中转站',apiBase:'https://api.jiushi.xin/v1',apiKey:'',model:'[按量]claude-sonnet-4-6'},{id:2,name:'官方API',apiBase:'https://api.anthropic.com',apiKey:'',model:'claude-sonnet-4-6'}]},load(K.cfg)||{});
 let sessions=load(K.sessions)||[];
 let currentSession=null;
 let messages=load(K.msgs)||[];
@@ -315,31 +313,8 @@ let nowTimer=null;
   updatePresetBtn();
   updateNow();
   nowTimer=setInterval(updateNow,30000);
-  // load sessions from backend
-  if(cfg.base){
-    fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions')
-      .then(r=>r.json())
-      .then(data=>{
-        if(data&&data.length){
-          sessions=data;save(K.sessions,sessions);
-          renderSessions();
-          currentSession=sessions[0];loadMessages();
-        } else {
-          renderSessions();
-          if(sessions.length===0)newSession();
-          else{currentSession=sessions[0];loadMessages();}
-        }
-      })
-      .catch(()=>{
-        renderSessions();
-        if(sessions.length===0)newSession();
-        else{currentSession=sessions[0];loadMessages();}
-      });
-  } else {
-    renderSessions();
-    if(sessions.length===0)newSession();
-    else{currentSession=sessions[0];loadMessages();}
-  }
+  // single conversation mode - get or create the one session
+  initSingleSession();
   checkAnnivs();
   setTimeout(initMic, 100);
   setTimeout(refreshHeaderMood, 500);
@@ -365,12 +340,43 @@ function toggleSb(){const sb=document.getElementById('sb'),ov=document.getElemen
 function hideSb(){document.getElementById('sb').classList.remove('show');document.getElementById('sbOverlay').classList.remove('show');}
 
 // ═══════════ SESSIONS ═══════════
+async function initSingleSession(){
+  if(!cfg.base){
+    // no backend, use local
+    if(!currentSession){
+      currentSession={id:'local-main',name:'我们的聊天'};
+      messages=load('cc_msgs_local-main')||[];
+    }
+    renderMessages();return;
+  }
+  try{
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions');
+    const data=await r.json();
+    if(data&&data.length){
+      // use the most recent session (or the one named "我们的聊天")
+      const main=data.find(s=>s.name==='我们的聊天')||data[0];
+      currentSession=main;
+      sessions=data;
+    } else {
+      // create the one session
+      const r2=await fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'我们的聊天'})});
+      currentSession=await r2.json();
+      sessions=[currentSession];
+    }
+    save(K.sessions,sessions);
+    loadMessages();
+  }catch(e){
+    if(sessions.length){currentSession=sessions[0];loadMessages();}
+    else renderMessages();
+  }
+}
+
 function renderSessions(){
   const el=document.getElementById('sessList');
   el.innerHTML=sessions.map(s=>`<div class="sb-item${currentSession?.id===s.id?' active':''}"
       onclick="switchSession('${s.id}')"
-      oncontextmenu="event.preventDefault();if(confirm('删除对话「${esc(s.name)}」？'))deleteSession('${s.id}')"
-      ontouchstart="startSessLongPress('${s.id}',event)"
+      oncontextmenu="event.preventDefault();deleteSessionConfirm('${s.id}','${esc(s.name)}')"
+      ontouchstart="startSessLongPress('${s.id}','${esc(s.name)}',event)"
       ontouchend="clearSessLongPress()"
       ontouchmove="clearSessLongPress()"
       style="user-select:none">
@@ -395,9 +401,12 @@ async function newSession(){
   }
 }
 let _sessLongPressTimer=null;
-function startSessLongPress(id,e){
+function deleteSessionConfirm(id,name){
+  if(confirm('删除对话「'+name+'」？'))deleteSession(id);
+}
+function startSessLongPress(id,name,e){
   _sessLongPressTimer=setTimeout(()=>{
-    if(confirm('删除这个对话？'))deleteSession(id);
+    deleteSessionConfirm(id,name);
   },600);
 }
 function clearSessLongPress(){
@@ -829,12 +838,11 @@ function sendLink(){
 function initMic(){
   const btn=document.getElementById('micBtn');
   if(!btn)return;
-  // detect mobile - hide if speech not supported
-  const isMobile=/Android|iPhone|iPad/i.test(navigator.userAgent);
   const hasSTT='webkitSpeechRecognition' in window||'SpeechRecognition' in window;
-  if(isMobile&&!hasSTT){btn.style.display='none';return;}
-  if(!hasSTT){btn.title='浏览器不支持语音识别';btn.style.opacity='0.3';return;}
-  // desktop: mousedown=start, mouseup=stop
+  const isMobile=/Android|iPhone|iPad/i.test(navigator.userAgent);
+  // only show if enabled in settings AND supported
+  if(!cfg.voiceEnabled||!hasSTT||isMobile){btn.style.display='none';return;}
+  btn.style.display='flex';
   btn.addEventListener('mousedown',startRec);
   btn.addEventListener('mouseup',stopRec);
   btn.addEventListener('mouseleave',stopRec);
