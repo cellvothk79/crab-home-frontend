@@ -517,6 +517,7 @@ async function loadMoreMessages(){
     // 记录当前滚动高度，加载后恢复位置
     const box=document.getElementById('chatBox');
     const oldHeight=box?box.scrollHeight:0;
+    window._loadingMore=true;
     renderMessages();
     if(box){
       // 新内容插入顶部，滚动位置补偿新增高度
@@ -573,7 +574,8 @@ function renderMessages(){
     if(t!==lastTime){html+='<div class="msg-time">'+t+'</div>';lastTime=t;}
     html+=renderMsg(m);
   }
-  el.innerHTML=html;if(!selMode)scrollEnd();
+  el.innerHTML=html;if(!selMode&&!window._loadingMore)scrollEnd();
+  window._loadingMore=false;
 }
 
 function renderMsg(m){
