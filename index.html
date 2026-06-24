@@ -367,9 +367,14 @@ function hideSb(){document.getElementById('sb').classList.remove('show');documen
 // ═══════════ SESSIONS ═══════════
 function renderSessions(){
   const el=document.getElementById('sessList');
-  el.innerHTML=sessions.map(s=>`<div class="sb-item${currentSession?.id===s.id?' active':''}" onclick="switchSession('${s.id}')">
-      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.name)}</span>
-      <button onclick="event.stopPropagation();deleteSession('${s.id}')" style="background:none;border:none;color:var(--tf);font-size:14px;cursor:pointer;padding:0 2px;display:none" class="sess-del">×</button>
+  el.innerHTML=sessions.map(s=>`<div class="sb-item${currentSession?.id===s.id?' active':''}"
+      onclick="switchSession('${s.id}')"
+      oncontextmenu="event.preventDefault();if(confirm('删除对话「${esc(s.name)}」？'))deleteSession('${s.id}')"
+      ontouchstart="startSessLongPress('${s.id}',event)"
+      ontouchend="clearSessLongPress()"
+      ontouchmove="clearSessLongPress()"
+      style="user-select:none">
+      ${esc(s.name)}
     </div>`).join('');
 }
 async function newSession(){
@@ -388,6 +393,16 @@ async function newSession(){
     currentSession=s;messages=[];
     renderSessions();renderMessages();hideSb();
   }
+}
+let _sessLongPressTimer=null;
+function startSessLongPress(id,e){
+  _sessLongPressTimer=setTimeout(()=>{
+    if(confirm('删除这个对话？'))deleteSession(id);
+  },600);
+}
+function clearSessLongPress(){
+  clearTimeout(_sessLongPressTimer);
+  _sessLongPressTimer=null;
 }
 async function deleteSession(id){
   if(!confirm('删除这个对话？'))return;
@@ -683,6 +698,12 @@ async function send(){
       if(cfg.apiBase)body.api_base=cfg.apiBase;
       if(cfg.systemPrompt)body.system_prompt_override=cfg.systemPrompt;
       if(q?.content)body.quote_content=q.content;
+      // attach image if last user message has one
+      const recentImgMsg=messages.filter(m=>m.role==='user'&&m.imageBase64).slice(-1)[0];
+      if(recentImgMsg&&allTexts.length<=1){
+        body.image_base64=recentImgMsg.imageBase64;
+        body.image_mime=recentImgMsg.imageMime||'image/jpeg';
+      }
       const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||'HTTP '+r.status);}
       const data=await r.json();reply=data.content||'(空回复)';
@@ -919,7 +940,7 @@ function ctxAct(action){
   document.getElementById('ctxMenu').style.display='none';
   if(!m)return;
   if(action==='copy'){try{navigator.clipboard.writeText(m.content);}catch(e){}}
-  if(action==='delete'){messages=messages.filter(x=>x.id!==m.id);saveMessages();renderMessages();}
+  if(action==='delete'){if(!confirm('删除这条消息？'))return;if(cfg.base&&m.id)fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+m.id,{method:'DELETE'}).catch(()=>{});messages=messages.filter(x=>x.id!==m.id);saveMessages();renderMessages();}
   if(action==='edit'){document.getElementById('msgInput').value=m.content;editingId=m.id;onInput(document.getElementById('msgInput'));document.getElementById('editBanner').style.display='flex';document.getElementById('msgInput').focus();}
   if(action==='quote'){quoteMsg=m;document.getElementById('quoteBanner').style.display='flex';document.getElementById('quoteText').textContent='引用: '+m.content.slice(0,50);document.getElementById('msgInput').focus();}
   if(action==='collect'){favs.push({type:'single',msg:{...m,savedAt:new Date().toISOString()}});save(K.favs,favs);}
@@ -1009,7 +1030,13 @@ function renderPresetPanel(){
 }
 
 function applyPreset(i){
-  const p=cfg.presets[i];cfg.apiBase=p.apiBase;cfg.apiKey=p.apiKey;cfg.model=p.model;save(K.cfg,cfg);updatePresetBtn();closePanel();
+  const p=cfg.presets[i];cfg.apiBase=p.apiBase;cfg.apiKey=p.apiKey;cfg.model=p.model;
+  save(K.cfg,cfg);
+  // backup critical values separately
+  localStorage.setItem('cc_apikey_backup',p.apiKey);
+  localStorage.setItem('cc_apibase_backup',p.apiBase);
+  localStorage.setItem('cc_model_backup',p.model);
+  updatePresetBtn();closePanel();
 }
 
 function editPreset(i){
@@ -1284,6 +1311,8 @@ function saveCfgSettings(){
   cfg.base=document.getElementById('cfgBase').value.trim();
   cfg.systemPrompt=document.getElementById('cfgPrompt').value.trim();
   save(K.cfg,cfg);
+  // also save base to a separate key as backup
+  if(cfg.base)localStorage.setItem('cc_base_backup',cfg.base);
   // sync system prompt to backend
   if(cfg.base){
     fetch(cfg.base.replace(/\/+$/,'')+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_prompt:cfg.systemPrompt})})
