@@ -469,7 +469,7 @@ async function loadMessages(){
   if(!currentSession){renderMessages();return;}
   if(cfg.base){
     try{
-      const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id);
+      const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=200');
       const data=await r.json();
       messages=data.map(m=>({
         id:m.id.toString(),
@@ -480,6 +480,9 @@ async function loadMessages(){
         type:m.image_url?'image':'text',
         imageUrl:m.image_url||null,
       }));
+      // 记录当前加载的偏移量
+      window._msgOffset=200;
+      window._msgTotal=null; // 未知总数
     }catch(e){
       messages=load('cc_msgs_'+currentSession.id)||[];
     }
@@ -488,6 +491,35 @@ async function loadMessages(){
   }
   renderMessages();
   checkDiary();
+}
+
+async function loadMoreMessages(){
+  if(!cfg.base||!currentSession)return;
+  const btn=document.getElementById('loadMoreBtn');
+  if(btn)btn.textContent='加载中...';
+  try{
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=200&offset='+(window._msgOffset||200));
+    const data=await r.json();
+    if(!data.length){if(btn)btn.style.display='none';return;}
+    const older=data.map(m=>({
+      id:m.id.toString(),
+      role:m.role,
+      content:m.content,
+      innerThought:m.inner_thought||'',
+      ts:m.created_at,
+      type:m.image_url?'image':'text',
+      imageUrl:m.image_url||null,
+    }));
+    messages=[...older,...messages];
+    window._msgOffset=(window._msgOffset||200)+data.length;
+    if(data.length<200&&btn)btn.style.display='none';
+    renderMessages();
+    // 保持滚动位置不跳
+    const box=document.getElementById('chatBox');
+    if(box)box.scrollTop=300;
+  }catch(e){
+    if(btn)btn.textContent='加载更多';
+  }
 }
 function checkDiary(){
   if(!cfg.base||!currentSession)return;
@@ -524,7 +556,12 @@ function renderMessages(){
     el.innerHTML='<div class="empty"><div class="empty-crabs">🦀 🦀</div><div style="font-size:11px">两只小螃蟹的家<br>新建对话开始聊天</div></div>';
     return;
   }
-  let html='';let lastTime='';
+  let html='';
+  // 加载更多按钮（有历史记录时显示）
+  if(cfg.base&&currentSession){
+    html+=`<div style="text-align:center;padding:12px 0"><button id="loadMoreBtn" onclick="loadMoreMessages()" style="background:transparent;border:1px solid var(--bd);border-radius:20px;color:var(--td);font-size:11px;padding:5px 14px;cursor:pointer">加载更早的消息</button></div>`;
+  }
+  let lastTime='';
   for(const m of messages){
     const t=fmtTime(m.ts);
     if(t!==lastTime){html+='<div class="msg-time">'+t+'</div>';lastTime=t;}
