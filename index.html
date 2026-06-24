@@ -510,7 +510,9 @@ function renderMsg(m){
   const selCls=selected.has(m.id)?'outline:2px solid var(--ac);':'';
   const opCls=selMode&&!selected.has(m.id)?'opacity:.55;':'';
   let q='';
-  if(m.quote)q=`<div class="quote-preview"><span style="opacity:.6">引用: </span>${esc(m.quote.content.slice(0,55))}${m.quote.content.length>55?'...':''}</div>`;
+  // support both m.quote (local) and m.quoteContent (from backend)
+  const quoteText=m.quoteContent||(m.quote?.content)||'';
+  if(quoteText)q=`<div class="quote-preview"><span style="opacity:.6">引用: </span>${esc(quoteText.slice(0,55))}${quoteText.length>55?'...':''}</div>`;
   let inner='';
   if(m.type==='image')inner=`<img src="${m.imageUrl}" alt="图片">`;
   else inner=`<span style="white-space:pre-wrap">${esc(m.content)}</span>`;
@@ -680,6 +682,7 @@ async function send(){
       if(cfg.apiKey)body.api_key=cfg.apiKey;
       if(cfg.apiBase)body.api_base=cfg.apiBase;
       if(cfg.systemPrompt)body.system_prompt_override=cfg.systemPrompt;
+      if(q?.content)body.quote_content=q.content;
       const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||'HTTP '+r.status);}
       const data=await r.json();reply=data.content||'(空回复)';
@@ -705,8 +708,10 @@ async function send(){
           role:m.role,
           content:m.content,
           innerThought:m.inner_thought||'',
+          quoteContent:m.quote_content||'',
           ts:m.created_at,
-          type:'text',
+          type:m.image_url?'image':'text',
+          imageUrl:m.image_url||null,
         }));
       }catch(e){
         // fallback: add reply locally
@@ -847,6 +852,28 @@ function toggleRec(){
 }
 
 // ═══════════ MOOD ═══════════
+function refreshHeaderMood(){
+  const el=document.getElementById('headerMood');
+  if(!el)return;
+  if(!cfg.base){
+    if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}
+    return;
+  }
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/random')
+    .then(r=>r.json())
+    .then(d=>{if(d.mood)el.textContent='💭 '+d.mood;})
+    .catch(()=>{if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}});
+}
+function updateHeaderMoodFromReply(){
+  const el=document.getElementById('headerMood');
+  if(!el||!cfg.base)return;
+  setTimeout(()=>{
+    fetch(cfg.base.replace(/\/+$/,'')+'/api/mood')
+      .then(r=>r.json())
+      .then(d=>{if(d.mood)el.textContent='💭 '+d.mood;})
+      .catch(()=>{});
+  },1500);
+}
 function toggleInner(msgId){
   const el=document.getElementById('inner_'+msgId);
   if(el)el.style.display=el.style.display==='none'?'block':'none';
@@ -960,7 +987,7 @@ function closePanel(){document.getElementById('overlay').style.display='none';cu
 function renderPanel(name){
   const el=document.getElementById('panelContent');
   if(name==='preset')el.innerHTML=renderPresetPanel();
-  else if(name==='memory')el.innerHTML=renderMemPanel();
+  else if(name==='memory'){renderMemPanel();}
   else if(name==='favs')el.innerHTML=renderFavsPanel();
   else if(name==='diary')el.innerHTML=renderDiaryPanel();
   else if(name==='settings')el.innerHTML=renderSettingsPanel();
@@ -1054,16 +1081,146 @@ function savePreset(i){
 function delPreset(i){if(confirm('删除此预设？')){cfg.presets.splice(i,1);save(K.cfg,cfg);renderPanel('preset');}}
 
 function renderMemPanel(){
-  const items=memories.map((m,i)=>`<div class="mem-item"><span style="flex:1">${esc(m)}</span><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:14px" onclick="delMem(${i})">×</button></div>`).join('');
-  return`<div class="panel-hdr"><span class="panel-title">记忆库</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-    <p style="font-size:11px;color:var(--td);margin-bottom:10px">每次对话自动注入给AI</p>
-    ${items||'<p style="font-size:12px;color:var(--tf);text-align:center;padding:16px 0">还没有记忆</p>'}
-    <div style="display:flex;gap:5px;margin-top:8px">
-      <input class="p-inp" id="memInp" style="margin-bottom:0;flex:1" placeholder="添加记忆...">
-      <button onclick="addMem()" style="padding:7px 10px;background:var(--ac);border:none;border-radius:8px;color:#0c0b0e;font-size:12px;cursor:pointer">添加</button>
-    </div>`;
+  const el=document.getElementById('panelContent');
+  el.innerHTML=`<div class="panel-hdr">
+    <span class="panel-title">记忆库</span>
+    <div style="display:flex;gap:5px">
+      <button class="h-btn" id="memTrashBtn" onclick="showMemTrash()">🗑 回收站</button>
+      <button class="h-btn" onclick="closePanel()">关闭</button>
+    </div>
+  </div>
+  <div id="memStats" style="display:flex;gap:10px;margin-bottom:10px;font-size:11px;color:var(--td)">加载中...</div>
+  <div style="display:flex;gap:5px;margin-bottom:10px">
+    <input class="p-inp" id="memSearch" style="margin-bottom:0;flex:1" placeholder="搜索记忆..." oninput="searchMems()">
+  </div>
+  <div id="memList" style="max-height:360px;overflow-y:auto"></div>
+  <div style="border-top:1px solid var(--bd);padding-top:10px;margin-top:8px">
+    <div style="font-size:11px;color:var(--td);margin-bottom:5px">手动添加记忆</div>
+    <div style="display:flex;gap:5px">
+      <input class="p-inp" id="memAddInp" style="margin-bottom:0;flex:1" placeholder="输入记忆内容..." onkeydown="if(event.key==='Enter')addMemManual()">
+      <button onclick="addMemManual()" style="padding:7px 10px;background:var(--ac);border:none;border-radius:8px;color:#0c0b0e;font-size:12px;cursor:pointer">添加</button>
+    </div>
+  </div>`;
+  loadMemStats();
+  loadMemList('');
 }
-function addMem(){const v=document.getElementById('memInp').value.trim();if(!v)return;memories.push(v);save(K.mems,memories);renderPanel('memory');}
+
+function loadMemStats(){
+  if(!cfg.base)return;
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/stats')
+    .then(r=>r.json())
+    .then(d=>{
+      const el=document.getElementById('memStats');
+      if(el)el.innerHTML=`<span>共 <b>${d.total}</b> 条</span><span>核心 <b style="color:var(--ac)">${d.core}</b></span><span>情节 <b>${d.episodic}</b></span><span>近7天新增 <b>${d.recent}</b></span>`;
+    }).catch(()=>{});
+}
+
+let memEditId=null;
+function loadMemList(q){
+  const el=document.getElementById('memList');if(!el)return;
+  if(!cfg.base){el.innerHTML='<p style="color:var(--tf);font-size:12px;text-align:center;padding:10px">需要配置后端地址</p>';return;}
+  el.innerHTML='<p style="color:var(--tf);font-size:12px;text-align:center;padding:10px">加载中...</p>';
+  const url=cfg.base.replace(/\/+$/,'')+'/api/memories/all'+(q?'?q='+encodeURIComponent(q):'');
+  fetch(url).then(r=>r.json()).then(data=>{
+    if(!el)return;
+    if(!data.length){el.innerHTML='<p style="color:var(--tf);font-size:12px;text-align:center;padding:16px">还没有记忆</p>';return;}
+    el.innerHTML=data.map(m=>`
+      <div style="background:var(--s2);border:1px solid ${m.memory_type==='core'?'rgba(212,165,116,.3)':'var(--bd)'};border-radius:8px;padding:8px 10px;margin-bottom:6px">
+        ${memEditId===m.id?`
+          <input id="memEditInp_${m.id}" style="width:100%;padding:5px 8px;background:var(--bg);border:1px solid var(--ac);border-radius:6px;color:var(--t);font-size:12.5px;margin-bottom:6px" value="${esc(m.summary)}">
+          <div style="display:flex;gap:5px">
+            <button onclick="saveMemEdit(${m.id})" style="flex:1;padding:5px;background:var(--ac);border:none;border-radius:6px;color:#0c0b0e;font-size:11px;cursor:pointer">保存</button>
+            <button onclick="memEditId=null;loadMemList(document.getElementById('memSearch')?.value||'')" style="flex:1;padding:5px;background:var(--s1);border:1px solid var(--bd);border-radius:6px;color:var(--td);font-size:11px;cursor:pointer">取消</button>
+          </div>
+        `:`
+          <div style="display:flex;align-items:flex-start;gap:6px">
+            <span style="flex:1;font-size:12.5px;line-height:1.5">${esc(m.summary)}</span>
+            <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">
+              <span style="font-size:9px;color:${m.memory_type==='core'?'var(--ac)':'var(--tf)'};text-align:right">${m.memory_type==='core'?'核心':'情节'}</span>
+              <div style="display:flex;gap:4px">
+                <button onclick="startMemEdit(${m.id})" style="background:none;border:none;color:var(--td);cursor:pointer;font-size:11px">✏</button>
+                <button onclick="softDelMem(${m.id})" style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:11px">🗑</button>
+              </div>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--tf);margin-top:4px">${fmtTime(m.created_at)}${m.tags?.length?' · '+m.tags.join(', '):''}</div>
+        `}
+      </div>`).join('');
+  }).catch(()=>{if(el)el.innerHTML='<p style="color:#c46;font-size:12px;text-align:center">加载失败</p>';});
+}
+
+function searchMems(){
+  const q=document.getElementById('memSearch')?.value||'';
+  clearTimeout(window._memSearchTimer);
+  window._memSearchTimer=setTimeout(()=>loadMemList(q),300);
+}
+
+function startMemEdit(id){memEditId=id;loadMemList(document.getElementById('memSearch')?.value||'');}
+
+function saveMemEdit(id){
+  const v=document.getElementById('memEditInp_'+id)?.value?.trim();
+  if(!v||!cfg.base)return;
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({summary:v})})
+    .then(()=>{memEditId=null;loadMemList(document.getElementById('memSearch')?.value||'');})
+    .catch(e=>alert(e.message));
+}
+
+function softDelMem(id){
+  if(!confirm('移入回收站？'))return;
+  if(!cfg.base)return;
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id,{method:'DELETE'})
+    .then(()=>loadMemList(document.getElementById('memSearch')?.value||''))
+    .catch(e=>alert(e.message));
+}
+
+function showMemTrash(){
+  const el=document.getElementById('memList');if(!el||!cfg.base)return;
+  document.getElementById('memTrashBtn').textContent='← 返回';
+  document.getElementById('memTrashBtn').onclick=()=>{document.getElementById('memTrashBtn').textContent='🗑 回收站';document.getElementById('memTrashBtn').onclick=showMemTrash;loadMemList('');};
+  el.innerHTML='<p style="color:var(--tf);font-size:11px;margin-bottom:8px">回收站中的记忆不会被AI读取，可恢复或永久删除</p>';
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/trash').then(r=>r.json()).then(data=>{
+    if(!data.length){el.innerHTML+='<p style="color:var(--tf);font-size:12px;text-align:center;padding:10px">回收站是空的</p>';return;}
+    el.innerHTML+=data.map(m=>`
+      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin-bottom:6px;opacity:.7">
+        <div style="font-size:12.5px;margin-bottom:5px">${esc(m.summary)}</div>
+        <div style="display:flex;gap:5px">
+          <button onclick="restoreMem(${m.id})" style="flex:1;padding:5px;background:var(--acl);border:1px solid var(--acb);border-radius:6px;color:var(--ac);font-size:11px;cursor:pointer">恢复</button>
+          <button onclick="permDelMem(${m.id})" style="flex:1;padding:5px;background:rgba(200,80,80,.1);border:1px solid rgba(200,80,80,.2);border-radius:6px;color:#c46;font-size:11px;cursor:pointer">永久删除</button>
+        </div>
+      </div>`).join('');
+  }).catch(()=>{});
+}
+
+function restoreMem(id){
+  if(!cfg.base)return;
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/restore',{method:'POST'})
+    .then(()=>showMemTrash()).catch(e=>alert(e.message));
+}
+
+function permDelMem(id){
+  if(!confirm('永久删除？此操作不可撤销。'))return;
+  if(!cfg.base)return;
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/permanent',{method:'DELETE'})
+    .then(()=>showMemTrash()).catch(e=>alert(e.message));
+}
+
+async function addMemManual(){
+  const v=document.getElementById('memAddInp')?.value?.trim();
+  if(!v)return;
+  if(cfg.base){
+    try{
+      await fetch(cfg.base.replace(/\/+$/,'')+'/api/memories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({summary:v})});
+      document.getElementById('memAddInp').value='';
+      loadMemList('');loadMemStats();
+    }catch(e){alert(e.message);}
+  } else {
+    memories.push(v);save(K.mems,memories);
+    document.getElementById('memAddInp').value='';
+    loadMemList('');
+  }
+}
+
+function addMem(){const v=document.getElementById('memInp')?.value?.trim();if(!v)return;memories.push(v);save(K.mems,memories);renderPanel('memory');}
 function delMem(i){memories.splice(i,1);save(K.mems,memories);renderPanel('memory');}
 
 function renderFavsPanel(){
