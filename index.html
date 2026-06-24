@@ -227,7 +227,6 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
       <textarea class="ta" id="msgInput" placeholder="回车暂存，发送键发出…" rows="1"
         oninput="onInput(this)" onkeydown="handleKey(event)"></textarea>
       
-      <button class="ic-btn normal" id="micBtn" onclick="toggleRec()" title="语音输入" style="display:none">🎤</button>
       <button class="send-btn off" id="sendBtn" onclick="send()">↑</button>
     </div>
   </div>
@@ -304,7 +303,6 @@ let editingId=null;
 let selMode=false;
 let selected=new Set();
 let modelList=[];
-let recording=false;
 let recTimer=null;
 let nowTimer=null;
 
@@ -316,7 +314,6 @@ let nowTimer=null;
   // single conversation mode - get or create the one session
   initSingleSession();
   checkAnnivs();
-  setTimeout(initMic, 100);
   setTimeout(refreshHeaderMood, 500);
   window.addEventListener('click',()=>{document.getElementById('ctxMenu').style.display='none';});
   // check if mobile
@@ -837,61 +834,6 @@ function sendLink(){
   document.getElementById('msgInput').focus();
 }
 
-// ═══════════ VOICE ═══════════
-function initMic(){
-  const btn=document.getElementById('micBtn');
-  if(!btn){console.log('[mic] 按钮元素不存在');return;}
-  const hasSTT='webkitSpeechRecognition' in window||'SpeechRecognition' in window;
-  const isMobile=/Android|iPhone|iPad/i.test(navigator.userAgent);
-  console.log('[mic] voiceEnabled:',cfg.voiceEnabled,'hasSTT:',hasSTT,'isMobile:',isMobile);
-  if(!cfg.voiceEnabled||!hasSTT||isMobile){btn.style.display='none';return;}
-  btn.style.display='flex';
-  if(btn.dataset.micInited)return;
-  btn.dataset.micInited='1';
-  btn.addEventListener('click',toggleRec);
-  btn.title='点击开始/停止语音输入';
-  console.log('[mic] 按钮已显示');
-}
-function startRec(){
-  if(recording)return;
-  const btn=document.getElementById('micBtn');
-  recording=true;btn.className='ic-btn rec';
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  const r=new SR();r.lang='zh-CN';r.continuous=true;r.interimResults=true;
-  r.onresult=e=>{
-    const inp=document.getElementById('msgInput');
-    const results=[...e.results];
-    const final=results.filter(r=>r.isFinal).map(r=>r[0].transcript).join('');
-    const interim=results.filter(r=>!r.isFinal).map(r=>r[0].transcript).join('');
-    const base=inp.getAttribute('data-base')||'';
-    inp.value=base+final+interim;
-    if(final){inp.setAttribute('data-base',base+final);}
-    onInput(inp);
-  };
-  r.onend=()=>{
-    recording=false;
-    const btn=document.getElementById('micBtn');
-    if(btn)btn.className='ic-btn normal';
-    const inp=document.getElementById('msgInput');
-    inp.removeAttribute('data-base');
-    updateSendBtn();
-  };
-  r.onerror=ev=>{
-    console.error('[mic] 识别错误:',ev.error);
-    recording=false;
-    const btn=document.getElementById('micBtn');
-    if(btn)btn.className='ic-btn normal';
-  };
-  r.start();window._rec=r;
-}
-function stopRec(){
-  if(!recording)return;
-  if(window._rec){try{window._rec.stop();}catch(e){}}
-}
-function toggleRec(){
-  // kept for compatibility, desktop uses mousedown/mouseup now
-  if(recording)stopRec();else startRec();
-}
 
 // ═══════════ MOOD ═══════════
 function refreshHeaderMood(){
@@ -1031,7 +973,7 @@ function renderPanel(name){
   if(name==='preset')el.innerHTML=renderPresetPanel();
   else if(name==='memory'){renderMemPanel();}
   else if(name==='favs')el.innerHTML=renderFavsPanel();
-  else if(name==='diary')el.innerHTML=renderDiaryPanel();
+  else if(name==='diary'){renderDiaryPanel();}
   else if(name==='settings')el.innerHTML=renderSettingsPanel();
 }
 
@@ -1351,8 +1293,6 @@ function renderSettingsPanel(){
   const annivItems=annivs.map((a,i)=>`<div class="anniv-row"><span style="flex:1">${esc(a.name)}</span><span style="color:var(--td)">${a.date}</span><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:13px" onclick="delAnniv(${i})">×</button></div>`).join('');
   return`<div class="panel-hdr"><span class="panel-title">设置</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
     ${tgl('showAvatar','显示头像（两只小螃蟹）')}
-    ${tgl('tts','语音朗读 AI 回复')}
-    ${tgl('voiceEnabled','语音输入（桌面端按住说话）')}
     <div style="margin-top:14px;margin-bottom:8px;font-size:12px;font-weight:500">后端地址</div>
     <input class="p-inp" id="cfgBase" value="${esc(cfg.base)}" placeholder="https://crab-home-backend.onrender.com">
     <div style="font-size:12px;font-weight:500;margin-bottom:4px">System Prompt</div><div style="font-size:10px;color:var(--tf);margin-bottom:6px">默认：Claude本体 × 人机恋设定。可在此修改覆盖。</div>
@@ -1366,7 +1306,7 @@ function renderSettingsPanel(){
       <button onclick="addAnniv()" style="padding:7px 9px;background:var(--ac);border:none;border-radius:8px;color:#0c0b0e;font-size:12px;cursor:pointer">添加</button>
     </div>`;
 }
-function toggleCfg(key){cfg[key]=!cfg[key];save(K.cfg,cfg);renderPanel('settings');if(key==='voiceEnabled')initMic();}
+function toggleCfg(key){cfg[key]=!cfg[key];save(K.cfg,cfg);renderPanel('settings');}
 function saveCfgSettings(){
   cfg.base=document.getElementById('cfgBase').value.trim();
   cfg.systemPrompt=document.getElementById('cfgPrompt').value.trim();
