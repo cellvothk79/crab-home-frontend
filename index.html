@@ -224,7 +224,6 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
 
       <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="sendImage(event)">
       <button class="ic-btn normal" onclick="document.getElementById('fileInput').click()" title="发图片">📎</button>
-      <button class="ic-btn normal" id="linkBtn" onclick="toggleLink()" title="发链接">🔗</button>
       <button class="ic-btn normal" id="voiceRecBtn" onclick="toggleVoiceRec()" title="按住录音">🎙</button>
       <textarea class="ta" id="msgInput" placeholder="回车暂存，发送键发出…" rows="1"
         oninput="onInput(this)" onkeydown="handleKey(event)"></textarea>
@@ -541,11 +540,19 @@ async function loadMoreMessages(){
     messages=[...older,...messages];
     window._oldestMsgTs=older[0].ts;
     if(data.length<200){window._noMoreMsgs=true;}
+
+    // 记录当前第一条可见消息的 id，加载后滚回它
     const box=document.getElementById('chatBox');
-    const oldHeight=box?box.scrollHeight:0;
+    const firstVisibleId=messages[older.length]?.id;
     window._loadingMore=true;
     renderMessages();
-    if(box)box.scrollTop=box.scrollHeight-oldHeight;
+    // 滚回到加载前第一条消息的位置
+    if(firstVisibleId){
+      const el=document.getElementById('msg_'+firstVisibleId)||document.querySelector(`[data-id="${firstVisibleId}"]`);
+      if(el)el.scrollIntoView({block:'start'});
+      else if(box)box.scrollTop=box.scrollHeight-box.scrollHeight*0.7; // fallback
+    }
+
     if(btn){
       if(window._noMoreMsgs){btn.textContent='没有更早的消息了';btn.disabled=true;}
       else btn.textContent='加载更早的消息';
@@ -622,7 +629,7 @@ function renderMsg(m){
   // TTS 按钮只对 AI 消息显示
   const ttsBtn=(!isU&&cfg.base)?`<button onclick="playTTS(event,'${m.id}')" style="background:none;border:none;color:var(--td);font-size:12px;cursor:pointer;padding:2px 4px;opacity:.6" title="听语音">🔊</button>`:'';
 
-  return`<div class="msg-row ${isU?'user':'bot'}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
+  return`<div class="msg-row ${isU?'user':'bot'}" id="msg_${m.id}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
     ${avHtml}
     <div class="msg-col ${isU?'user':'bot'}">
       ${q}
@@ -1551,7 +1558,7 @@ function renderSettingsPanel(){
     ${tgl('showAvatar','显示头像（两只小螃蟹）')}
     <div style="margin-top:14px;margin-bottom:8px;font-size:12px;font-weight:500">后端地址</div>
     <input class="p-inp" id="cfgBase" value="${esc(cfg.base)}" placeholder="https://crab-home-backend.onrender.com">
-    <div style="font-size:12px;font-weight:500;margin-bottom:4px">System Prompt</div><div style="font-size:10px;color:var(--tf);margin-bottom:6px">默认：Claude本体 × 人机恋设定。可在此修改覆盖。</div>
+    <div style="font-size:12px;font-weight:500;margin-bottom:4px">System Prompt</div><div style="font-size:10px;color:var(--tf);margin-bottom:6px">默认：Claude本体 × 伴侣关系，说话简短自然。可在此修改覆盖。</div>
     <textarea class="p-inp" id="cfgPrompt" style="min-height:60px;resize:vertical;line-height:1.5" placeholder="定义AI的人格和行为...">${esc(cfg.systemPrompt||'')}</textarea>
     <button class="p-btn save" onclick="saveCfgSettings()">保存</button>
     <div style="margin-top:14px;margin-bottom:8px;font-size:12px;font-weight:500">纪念日 <span style="color:var(--tf);font-weight:400">（在对话里说出来他会自动记，这里也可以手动加）</span></div>
