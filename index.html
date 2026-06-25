@@ -478,12 +478,12 @@ async function loadMessages(){
         content:m.content,
         innerThought:m.inner_thought||'',
         ts:m.created_at,
-        type:m.image_url?'image':'text',
-        imageUrl:m.image_url||null,
+        type:'text',
+        imageUrl:null,
       }));
-      // 记录当前加载的偏移量
-      window._msgOffset=200;
-      window._msgTotal=null; // 未知总数
+      // 记录最早消息的时间戳，用于加载更多
+      window._oldestMsgTs=messages.length?messages[0].ts:null;
+      window._noMoreMsgs=data.length<200;
     }catch(e){
       messages=load('cc_msgs_'+currentSession.id)||[];
     }
@@ -496,34 +496,40 @@ async function loadMessages(){
 
 async function loadMoreMessages(){
   if(!cfg.base||!currentSession)return;
+  if(window._noMoreMsgs)return;
   const btn=document.getElementById('loadMoreBtn');
   if(btn)btn.textContent='加载中...';
   try{
-    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=200&offset='+(window._msgOffset||200));
+    const before=window._oldestMsgTs||'';
+    if(!before){if(btn){btn.textContent='没有更早的消息了';btn.disabled=true;}return;}
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=200&before='+encodeURIComponent(before));
     const data=await r.json();
-    if(!data.length){if(btn){btn.textContent='没有更早的消息了';btn.disabled=true;}return;}
+    if(!data.length){
+      if(btn){btn.textContent='没有更早的消息了';btn.disabled=true;}
+      window._noMoreMsgs=true;
+      return;
+    }
     const older=data.map(m=>({
       id:m.id.toString(),
       role:m.role,
       content:m.content,
       innerThought:m.inner_thought||'',
       ts:m.created_at,
-      type:m.image_url?'image':'text',
-      imageUrl:m.image_url||null,
+      type:'text',
+      imageUrl:null,
     }));
     messages=[...older,...messages];
-    window._msgOffset=(window._msgOffset||200)+data.length;
-    if(data.length<200&&btn){btn.textContent='没有更早的消息了';btn.disabled=true;}
-    // 记录当前滚动高度，加载后恢复位置
+    window._oldestMsgTs=older[0].ts;
+    if(data.length<200){window._noMoreMsgs=true;}
     const box=document.getElementById('chatBox');
     const oldHeight=box?box.scrollHeight:0;
     window._loadingMore=true;
     renderMessages();
-    if(box){
-      // 新内容插入顶部，滚动位置补偿新增高度
-      box.scrollTop=box.scrollHeight-oldHeight;
+    if(box)box.scrollTop=box.scrollHeight-oldHeight;
+    if(btn){
+      if(window._noMoreMsgs){btn.textContent='没有更早的消息了';btn.disabled=true;}
+      else btn.textContent='加载更早的消息';
     }
-    if(btn&&!btn.disabled)btn.textContent='加载更早的消息';
   }catch(e){
     if(btn)btn.textContent='加载更早的消息';
   }
@@ -566,7 +572,7 @@ function renderMessages(){
   let html='';
   // 加载更多按钮（有历史记录时显示）
   if(cfg.base&&currentSession){
-    html+=`<div style="text-align:center;padding:12px 0"><button id="loadMoreBtn" onclick="loadMoreMessages()" style="background:transparent;border:1px solid var(--bd);border-radius:20px;color:var(--td);font-size:11px;padding:5px 14px;cursor:pointer">加载更早的消息</button></div>`;
+    html+=`<div style="text-align:center;padding:16px 0"><button id="loadMoreBtn" onclick="loadMoreMessages()" style="background:rgba(212,165,116,.1);border:1px solid rgba(212,165,116,.3);border-radius:20px;color:var(--ac);font-size:12px;padding:8px 20px;cursor:pointer;min-width:120px">加载更早的消息</button></div>`;
   }
   let lastTime='';
   for(const m of messages){
@@ -766,50 +772,31 @@ async function send(){
     }
 
     hideTyping();
-    // handle multi-message reply
-    // reload messages from backend to get real data with inner_thought
-    if(cfg.base&&currentSession){
-      try{
-        const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id);
-        const freshMsgs=await r.json();
-        messages=freshMsgs.map(m=>({
-          id:m.id.toString(),
-          role:m.role,
-          content:m.content,
-          innerThought:m.inner_thought||'',
-          quoteContent:m.quote_content||'',
-          ts:m.created_at,
-          type:m.image_url?'image':'text',
-          imageUrl:m.image_url||null,
-        }));
-      }catch(e){
-        // fallback: add reply locally
-        const replyMsgs=data.messages||[{content:reply,inner:''}];
-        for(let i=0;i<replyMsgs.length;i++){
-          const rm=replyMsgs[i];
-          messages.push({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner,ts:new Date().toISOString(),type:'text'});
-        }
-      }
+    // 追加 AI 回复到本地消息数组（不重新从后端拉，避免图片消失）
+    const replyData = await (async()=>{try{const rr=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=20');const dd=await rr.json();return dd;}catch(e){return [];}})();
+    // 找到比当前最后一条消息更新的消息
+    const lastTs=messages.length?messages[messages.length-1].ts:'';
+    const newMsgs=(replyData||[]).filter(m=>m.created_at>lastTs&&m.role==='assistant');
+    const msgsToAdd=newMsgs.length?newMsgs.map(m=>({id:m.id.toString(),role:'assistant',content:m.content,innerThought:m.inner_thought||'',ts:m.created_at,type:'text'})):(()=>{const replyMsgs=(typeof data==='object'&&data.messages)||[{content:reply,inner:''}];return replyMsgs.map((rm,i)=>({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner||'',ts:new Date().toISOString(),type:'text'}));})();
+
+    // 逐条显示，每条间隔1秒，像真人发微信
+    if(msgsToAdd.length<=1){
+      if(msgsToAdd.length)messages.push(msgsToAdd[0]);
+      saveMessages();renderMessages();
     } else {
-      const replyMsgs=data.messages||[{content:reply,inner:''}];
-      for(let i=0;i<replyMsgs.length;i++){
-        const rm=replyMsgs[i];
-        messages.push({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner,ts:new Date().toISOString(),type:'text'});
+      // 先显示第一条
+      messages.push(msgsToAdd[0]);
+      saveMessages();renderMessages();
+      // 后续每条延迟1秒显示
+      for(let i=1;i<msgsToAdd.length;i++){
+        await new Promise(r=>setTimeout(r,1000));
+        showTyping();
+        await new Promise(r=>setTimeout(r,600));
+        hideTyping();
+        messages.push(msgsToAdd[i]);
+        saveMessages();renderMessages();
       }
     }
-
-    // if todo query, insert todo card
-    if(showTodo){
-      messages.push({id:Date.now().toString()+'t',role:'system',content:'',ts:new Date().toISOString(),type:'todo'});
-      // follow-up reaction
-      const undone=todos.filter(t=>!t.done).length;
-      setTimeout(()=>{
-        messages.push({id:Date.now().toString()+'r',role:'assistant',content:undone>0?`还有 ${undone} 件没做完哦，加油！💪`:'今天的事全做完啦！好厉害🎉',ts:new Date().toISOString(),type:'text'});
-        saveMessages();renderMessages();
-      },600);
-    }
-
-    saveMessages();renderMessages();
     // update session name if first message
     if(messages.filter(m=>m.role==='user').length===1){
       const name=text.slice(0,14)+(text.length>14?'...':'');
@@ -893,14 +880,16 @@ async function generateMood(){
 function refreshHeaderMood(){
   const el=document.getElementById('headerMood');
   if(!el)return;
+  el.style.opacity='0.4';
   if(!cfg.base){
     if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}
+    el.style.opacity='0.8';
     return;
   }
   fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/random')
     .then(r=>r.json())
-    .then(d=>{if(d.mood)el.textContent='💭 '+d.mood;})
-    .catch(()=>{if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}});
+    .then(d=>{if(d.mood)el.textContent='💭 '+d.mood;el.style.opacity='0.8';})
+    .catch(()=>{if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}el.style.opacity='0.8';});
 }
 function updateHeaderMoodFromReply(){
   // 已改为按需生成，回复后不自动更新心声
@@ -1372,7 +1361,7 @@ function renderSettingsPanel(){
       <button onclick="addAnniv()" style="padding:7px 9px;background:var(--ac);border:none;border-radius:8px;color:#0c0b0e;font-size:12px;cursor:pointer">添加</button>
     </div>`;
 }
-function toggleCfg(key){cfg[key]=!cfg[key];save(K.cfg,cfg);renderPanel('settings');}
+function toggleCfg(key){cfg[key]=!cfg[key];save(K.cfg,cfg);renderPanel('settings');if(key==='showAvatar')renderMessages();}
 function saveCfgSettings(){
   cfg.base=document.getElementById('cfgBase').value.trim();
   cfg.systemPrompt=document.getElementById('cfgPrompt').value.trim();
