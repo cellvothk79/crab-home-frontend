@@ -858,129 +858,94 @@ async function send(){
 }
 
 // ═══════════ VOICE RECORDING ═══════════
-let isRecording = false;
-let recognition = null;
-let waveAnimTimer = null;
-let finalTranscript = '';
+let mediaRecorder=null;
+let audioChunks=[];
+let isRecording=false;
+let waveAnimTimer=null;
 
-function toggleVoiceRec() {
-  const overlay = document.getElementById('voiceOverlay');
-  overlay.style.display = 'flex';
+function toggleVoiceRec(){
+  const overlay=document.getElementById('voiceOverlay');
+  overlay.style.display='flex';
 }
 
-function startVoiceRec(e) {
+function startVoiceRec(e){
   e.preventDefault();
-  if (isRecording) return;
-
-  // 检查浏览器支持
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    alert('你的浏览器不支持语音识别，请用 Chrome');
-    return;
-  }
-
-  isRecording = true;
-  finalTranscript = '';
-
-  recognition = new SpeechRecognition();
-  recognition.lang = 'zh-CN';
-  recognition.interimResults = true;    // 实时显示中间结果
-  recognition.continuous = true;        // 持续录音直到手动停止
-  recognition.maxAlternatives = 1;
-
-  recognition.onresult = (event) => {
-    let interim = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) {
-        finalTranscript += event.results[i][0].transcript;
-      } else {
-        interim += event.results[i][0].transcript;
-      }
-    }
-    // 实时显示在状态区域
-    const status = document.getElementById('voiceStatus');
-    if (finalTranscript || interim) {
-      status.textContent = finalTranscript + interim;
-    } else {
-      status.textContent = '录音中...';
-    }
-  };
-
-  recognition.onerror = (event) => {
-    console.error('语音识别错误:', event.error);
-    if (event.error === 'not-allowed') {
-      alert('需要麦克风权限');
-    }
-    // 不要在这里停止，有些错误是临时的
-  };
-
-  recognition.onend = () => {
-    // 如果还在录音状态但识别意外停了，自动重启
-    if (isRecording) {
-      try { recognition.start(); } catch(e) {}
-    }
-  };
-
-  recognition.start();
-
-  document.getElementById('voiceStatus').textContent = '录音中...';
-  document.getElementById('voiceRecordBtn').style.background = '#c46';
-
-  // 波形动画
-  waveAnimTimer = setInterval(() => {
-    document.querySelectorAll('.wave-bar').forEach(b => {
-      b.style.height = Math.random() * 32 + 4 + 'px';
-      b.style.opacity = '1';
-    });
-  }, 150);
+  if(isRecording)return;
+  navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+    isRecording=true;
+    audioChunks=[];
+    mediaRecorder=new MediaRecorder(stream,{mimeType:'audio/webm'});
+    mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
+    mediaRecorder.start();
+    document.getElementById('voiceStatus').textContent='录音中...';
+    document.getElementById('voiceRecordBtn').style.background='#c46';
+    // 波形动画
+    waveAnimTimer=setInterval(()=>{
+      document.querySelectorAll('.wave-bar').forEach(b=>{
+        b.style.height=Math.random()*32+4+'px';
+        b.style.opacity='1';
+      });
+    },150);
+  }).catch(()=>{
+    alert('需要麦克风权限');
+  });
 }
 
-async function stopVoiceRec(e) {
+async function stopVoiceRec(e){
   e.preventDefault();
-  if (!isRecording || !recognition) return;
-
-  isRecording = false;
+  if(!isRecording||!mediaRecorder)return;
+  isRecording=false;
   clearInterval(waveAnimTimer);
-  document.getElementById('voiceStatus').textContent = '处理中...';
-  document.getElementById('voiceRecordBtn').style.background = 'var(--ac)';
+  document.getElementById('voiceStatus').textContent='处理中...';
+  document.getElementById('voiceRecordBtn').style.background='var(--ac)';
 
-  recognition.stop();
+  mediaRecorder.stop();
+  mediaRecorder.stream.getTracks().forEach(t=>t.stop());
 
-  // 等一小会让最后的结果回来
-  await new Promise(resolve => setTimeout(resolve, 500));
+  mediaRecorder.onstop=async()=>{
+    const blob=new Blob(audioChunks,{type:'audio/webm'});
+    document.getElementById('voiceOverlay').style.display='none';
 
-  document.getElementById('voiceOverlay').style.display = 'none';
+    if(!cfg.base){
+      alert('需要配置后端才能发语音');return;
+    }
 
-  const text = finalTranscript.trim();
-  if (!text) {
-    alert('没有识别到语音内容，请重试');
-    return;
-  }
-
-  // 把转写文字当成消息发出去（跟原来逻辑一致）
-  const voiceMsg = {
-    id: Date.now().toString(),
-    role: 'user',
-    content: text,
-    emotion: '',
-    ts: new Date().toISOString(),
-    type: 'voice',
+    // 上传到后端做 Whisper 转写
+    const fd=new FormData();
+    fd.append('audio',blob,'voice.webm');
+    try{
+      const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/transcribe',{method:'POST',body:fd});
+      const d=await r.json();
+      if(d.text){
+        // 把转写文字 + 情绪当成消息发出去
+        const voiceMsg={
+          id:Date.now().toString(),
+          role:'user',
+          content:d.text,
+          emotion:d.emotion||'',
+          ts:new Date().toISOString(),
+          type:'voice',
+        };
+        messages.push(voiceMsg);
+        saveMessages();renderMessages();
+        // 发给 AI
+        await sendVoiceMessage(d.text, d.emotion);
+      }
+    }catch(err){
+      console.error('语音转写失败:',err);
+      alert('转写失败，请重试');
+    }
   };
-  messages.push(voiceMsg);
-  saveMessages();
-  renderMessages();
-
-  // 发给 AI
-  await sendVoiceMessage(text, '');
 }
 
-function cancelVoiceRec() {
-  if (recognition && isRecording) {
-    isRecording = false;
-    recognition.stop();
+function cancelVoiceRec(){
+  if(mediaRecorder&&isRecording){
+    isRecording=false;
+    mediaRecorder.stop();
+    mediaRecorder.stream.getTracks().forEach(t=>t.stop());
     clearInterval(waveAnimTimer);
   }
-  document.getElementById('voiceOverlay').style.display = 'none';
+  document.getElementById('voiceOverlay').style.display='none';
 }
 
 async function sendVoiceMessage(text, emotion){
