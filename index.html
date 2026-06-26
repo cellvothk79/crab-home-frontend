@@ -1113,7 +1113,6 @@ async function sendCallMessage(text){
     });
     if(!r.ok)throw new Error('HTTP '+r.status);
 
-    clearTimeout(fillerTimer);
     if(currentAudio){currentAudio.pause();currentAudio=null;}
 
     const reader=r.body.getReader();
@@ -1147,16 +1146,17 @@ async function sendCallMessage(text){
       callTranscriptLog.push({role:'assistant',content:fullReply,ts:new Date().toISOString()});
     }
 
-    // 等音频队列播完
+    // 等音频队列播完再恢复听
     await new Promise(resolve=>{
       const check=setInterval(()=>{
-        if(!audioPlaying&&!audioQueue.length){clearInterval(check);resolve();}
+        if(!audioPlaying&&!audioQueue.length&&(!currentAudio||currentAudio.paused||currentAudio.ended)){
+          clearInterval(check);resolve();
+        }
       },200);
-      setTimeout(()=>{clearInterval(check);resolve();},15000);
+      setTimeout(()=>{clearInterval(check);resolve();},30000);
     });
 
   }catch(e){
-    clearTimeout(fillerTimer);
     console.error('通话streaming失败:',e.message);
     setCallStatus('出错了，继续说...');
   }finally{
