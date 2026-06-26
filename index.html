@@ -525,13 +525,14 @@ async function loadMessages(){
       const data=await r.json();
       messages=data.map(m=>({
         id:m.id.toString(),
-        role:m.role,
+        role:m.role==='call_card'?'system':m.role,
         content:m.content,
         innerThought:m.inner_thought||'',
         ts:m.created_at,
-        type:m.is_voice?'voice':'text',
+        type:m.role==='call_card'?'call-card':(m.is_voice?'voice':'text'),
         imageUrl:null,
         audioUrl:m.audio_url||null,
+        callActive:false,
       }));
       // 记录最早消息的时间戳，用于加载更多
       window._oldestMsgTs=messages.length?messages[0].ts:null;
@@ -1036,28 +1037,127 @@ function startListening(){
   try{callRecognition.start();}catch(e){}
 }
 
+// 预生成语气词音频（掩盖思考延迟）
+const FILLER_WORDS=['嗯…','让我想想','这个嘛…','嗯嗯'];
+let fillerAudios={};
+async function preloadFillers(){
+  if(!cfg.base)return;
+  for(const word of FILLER_WORDS){
+    try{
+      const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:word,emotion:'平静',channel:cfg.ttsChannel||'minimax',lang:'zh',call_mode:true}),
+      });
+      if(r.ok){
+        const blob=await r.blob();
+        fillerAudios[word]=URL.createObjectURL(blob);
+      }
+    }catch(e){}
+  }
+  console.log('[通话] 语气词预加载完成');
+}
+
+let fillerTimer=null;
+function playFiller(){
+  const words=Object.keys(fillerAudios);
+  if(!words.length)return;
+  const url=fillerAudios[words[Math.floor(Math.random()*words.length)]];
+  if(currentAudio){currentAudio.pause();currentAudio=null;}
+  currentAudio=new Audio(url);
+  currentAudio.play();
+  currentAudio.onended=()=>{currentAudio=null;};
+}
+
+// 音频播放队列（保证顺序播放）
+let audioQueue=[];
+let audioPlaying=false;
+function enqueueAudio(base64,format='mp3'){
+  audioQueue.push({base64,format});
+  if(!audioPlaying)drainAudioQueue();
+}
+async function drainAudioQueue(){
+  if(audioPlaying||!audioQueue.length)return;
+  audioPlaying=true;
+  const {base64,format}=audioQueue.shift();
+  try{
+    const bytes=atob(base64);
+    const arr=new Uint8Array(bytes.length);
+    for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);
+    const blob=new Blob([arr],{type:'audio/'+format});
+    const url=URL.createObjectURL(blob);
+    if(currentAudio){currentAudio.pause();currentAudio=null;}
+    currentAudio=new Audio(url);
+    currentAudio.onended=()=>{
+      currentAudio=null;audioPlaying=false;
+      URL.revokeObjectURL(url);
+      drainAudioQueue();
+    };
+    currentAudio.onerror=()=>{audioPlaying=false;drainAudioQueue();};
+    await currentAudio.play();
+  }catch(e){audioPlaying=false;drainAudioQueue();}
+}
+
 async function sendCallMessage(text){
   if(!callActive||!text.trim())return;
   clearTimeout(callSilenceTimer);
   if(callRecognition){try{callRecognition.abort();}catch(e){}}
   callTranscriptLog.push({role:'user',content:text,ts:new Date().toISOString()});
   setCallStatus('他在想...');animateCallWave(false);callSpeaking=true;
+  audioQueue=[];audioPlaying=false;
+
   try{
-    const body={session_id:currentSession?.id,content:'[通话中] '+text,model:cfg.model,is_voice:true,call_mode:true};
-    if(cfg.apiKey)body.api_key=cfg.apiKey;
-    if(cfg.apiBase)body.api_base=cfg.apiBase;
-    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    // 用 streaming 接口
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/stream',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:currentSession?.id,content:text,model:cfg.model,api_key:cfg.apiKey,api_base:cfg.apiBase}),
+    });
     if(!r.ok)throw new Error('HTTP '+r.status);
-    const data=await r.json();
-    const reply=(data.messages?.[0]?.content)||data.content||'';
-    if(!reply)throw new Error('空回复');
-    callTranscriptLog.push({role:'assistant',content:reply,ts:new Date().toISOString()});
-    setCallStatus('他：'+reply.slice(0,30)+(reply.length>30?'...':''));
-    animateCallWave(true);
-    await playCallTTS(reply);
-    setCallStatus('在听...');
+
+    clearTimeout(fillerTimer);
+    if(currentAudio){currentAudio.pause();currentAudio=null;}
+
+    const reader=r.body.getReader();
+    const decoder=new TextDecoder();
+    let fullReply='';
+
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      const chunk=decoder.decode(value);
+      const lines=chunk.split('\n');
+      for(const line of lines){
+        if(!line.startsWith('data: '))continue;
+        try{
+          const evt=JSON.parse(line.slice(6));
+          if(evt.type==='text'){
+            setCallStatus('他：'+evt.text.slice(0,25)+(evt.text.length>25?'...':''));
+            animateCallWave(true);
+          } else if(evt.type==='audio'){
+            enqueueAudio(evt.audio,evt.format||'mp3');
+          } else if(evt.type==='done'){
+            fullReply=evt.fullReply||fullReply;
+          } else if(evt.type==='error'){
+            throw new Error(evt.error);
+          }
+        }catch(e){}
+      }
+    }
+
+    if(fullReply){
+      callTranscriptLog.push({role:'assistant',content:fullReply,ts:new Date().toISOString()});
+    }
+
+    // 等音频队列播完
+    await new Promise(resolve=>{
+      const check=setInterval(()=>{
+        if(!audioPlaying&&!audioQueue.length){clearInterval(check);resolve();}
+      },200);
+      setTimeout(()=>{clearInterval(check);resolve();},15000);
+    });
+
   }catch(e){
-    console.error('通话消息失败:',e.message);
+    clearTimeout(fillerTimer);
+    console.error('通话streaming失败:',e.message);
     setCallStatus('出错了，继续说...');
   }finally{
     callSpeaking=false;animateCallWave(false);
@@ -1115,11 +1215,32 @@ async function endCall(){
   const startedAtToSave=callStartedAt;
   callTranscriptLog=[];callStartedAt=null;
 
+  console.log('[通话结束] transcript条数:', transcriptToSave.length, 'duration:', durationToSave);
+
   if(transcriptToSave.length>0&&currentSession){
+    const m=String(Math.floor(durationToSave/60)).padStart(2,'0');
+    const s=String(durationToSave%60).padStart(2,'0');
+    // 把通话卡片存进数据库（这样刷新后还在）
     fetch(cfg.base.replace(/\/+$/,'')+'/api/call/save',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({session_id:currentSession.id,transcript:transcriptToSave,duration:durationToSave,started_at:startedAtToSave}),
-    }).then(r=>r.json()).then(d=>console.log('[通话记录]',d)).catch(e=>console.error('[通话记录失败]',e));
+      body:JSON.stringify({
+        session_id:currentSession.id,
+        transcript:transcriptToSave,
+        duration:durationToSave,
+        started_at:startedAtToSave,
+        card_content:'📞 通话 '+m+':'+s,
+      }),
+    }).then(r=>r.json()).then(d=>{
+      console.log('[通话记录已保存]',d);
+      // 保存成功后把通话卡片也加到消息里（刷新后从DB恢复）
+      if(d.card_id){
+        const card=messages.find(m=>m.id===window._callCardId);
+        if(card)card.db_id=d.card_id;
+        saveMessages();
+      }
+    }).catch(e=>console.error('[通话记录保存失败]',e));
+  } else {
+    console.log('[通话结束] 没有对话内容，跳过保存');
   }
 }
 
@@ -1324,6 +1445,24 @@ async function autoGenVoiceBubble(msg){
   if(!cfg.base||!msg?.content)return;
   try{
     const emotion=guessEmotion(msg.content);
+    const bubbleId=msg.id+'_voice';
+
+    // 先检查是否已有气泡
+    const existingIdx=messages.findIndex(m=>m.id===bubbleId);
+    const selfIdx=messages.findIndex(m=>m.id===msg.id&&m.type==='voice');
+    if(existingIdx<0&&selfIdx<0){
+      // 立刻插入占位气泡（loading状态，没有audioUrl）
+      const placeholder={
+        id:bubbleId,role:'assistant',content:msg.content,
+        translatedContent:null,ts:msg.ts,type:'voice',
+        audioUrl:null,emotion,loading:true,
+      };
+      const msgIdx=messages.findIndex(m=>m.id===msg.id);
+      if(msgIdx>=0)messages.splice(msgIdx+1,0,placeholder);
+      else messages.push(placeholder);
+      saveMessages();renderMessages();
+    }
+
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -1337,11 +1476,9 @@ async function autoGenVoiceBubble(msg){
       if(!d.audioUrl)return;
       audioUrl=d.audioUrl;
       if(d.translatedText)msg._translatedText=d.translatedText;
-      // 把 audioUrl 存回数据库，刷新后还能播放
       if(msg.id&&!msg.id.includes('_voice')){
         fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+msg.id+'/audio',{
-          method:'PATCH',
-          headers:{'Content-Type':'application/json'},
+          method:'PATCH',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({audio_url:audioUrl}),
         }).catch(()=>{});
       }
@@ -1349,33 +1486,21 @@ async function autoGenVoiceBubble(msg){
       const audioBlob=await r.blob();
       audioUrl=URL.createObjectURL(audioBlob);
     }
-    // 检查是否已有语音气泡（防止重复）
-    const existingVoiceIdx=messages.findIndex(m=>m.id===msg.id+'_voice');
+
+    // 更新气泡的 audioUrl
+    const existingVoiceIdx=messages.findIndex(m=>m.id===bubbleId);
     if(existingVoiceIdx>=0){
       messages[existingVoiceIdx].audioUrl=audioUrl;
+      messages[existingVoiceIdx].translatedContent=msg._translatedText||null;
+      messages[existingVoiceIdx].loading=false;
       saveMessages();renderMessages();
       return;
     }
-    // 刷新后 voice 消息本身就是气泡，直接更新 audioUrl
-    const selfIdx=messages.findIndex(m=>m.id===msg.id&&m.type==='voice');
-    if(selfIdx>=0){
-      messages[selfIdx].audioUrl=audioUrl;
+    const sIdx=messages.findIndex(m=>m.id===msg.id&&m.type==='voice');
+    if(sIdx>=0){
+      messages[sIdx].audioUrl=audioUrl;
       saveMessages();renderMessages();
-      return;
     }
-    const voiceBubble={
-      id:msg.id+'_voice',
-      role:'assistant',
-      content:msg.content,
-      translatedContent:msg._translatedText||null,
-      ts:msg.ts,
-      type:'voice',
-      audioUrl,
-      emotion,
-    };
-    const idx=messages.findIndex(m=>m.id===msg.id);
-    if(idx>=0){messages.splice(idx+1,0,voiceBubble);}
-    else{messages.push(voiceBubble);}
     saveMessages();renderMessages();
   }catch(e){
     console.log('自动语音气泡生成失败:',e.message);
