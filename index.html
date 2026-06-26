@@ -696,17 +696,21 @@ function renderVoiceMsg(m){
   const isU=m.role==='user';
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
   const hasAudio=!!m.audioUrl;
-  const voiceBar=`<div onclick="playVoiceMsg(event,'${m.id}')" style="display:flex;align-items:center;gap:6px;cursor:${hasAudio?'pointer':'default'};min-width:80px">
+  const selCls=selected.has(m.id)?'outline:2px solid var(--ac);':'';
+  const opCls=selMode&&!selected.has(m.id)?'opacity:.55;':'';
+  // 多选模式下不触发播放
+  const voiceBar=`<div onclick="${selMode?`onMsgClick('${m.id}')`:`playVoiceMsg(event,'${m.id}')`}" style="display:flex;align-items:center;gap:6px;cursor:pointer;min-width:80px">
     <span id="vbtn_${m.id}" style="font-size:15px">${hasAudio?'▶':'🎙'}</span>
     <div style="display:flex;align-items:center;gap:2px;flex:1">
       ${[4,7,10,14,10,7,5,8,12,8,5].map(h=>`<div style="width:2px;height:${h}px;background:currentColor;border-radius:1px;opacity:.7"></div>`).join('')}
     </div>
   </div>`;
-  const transcriptBtn=m.content?`<div style="font-size:11px;color:var(--td);margin-top:4px;cursor:pointer" onclick="toggleVoiceTranscript('${m.id}')">[查看转写文字]</div><div id="vtxt_${m.id}" style="display:none;font-size:12px;color:var(--t);margin-top:4px;padding-top:4px;border-top:1px solid var(--bd)">${m.translatedContent?`<div style="color:var(--ac);margin-bottom:3px">${esc(m.translatedContent)}</div>`:''} ${esc(m.content)}</div>`:'';
+  const displayContent=(m.content||'').replace(/^\[语音情绪:[^\]]+\]\s*/,'');
+  const transcriptBtn=displayContent?`<div style="font-size:11px;color:var(--td);margin-top:4px;cursor:pointer" onclick="toggleVoiceTranscript('${m.id}')">[查看转写文字]</div><div id="vtxt_${m.id}" style="display:none;font-size:12px;color:var(--t);margin-top:4px;padding-top:4px;border-top:1px solid var(--bd)">${m.translatedContent?`<div style="color:var(--ac);margin-bottom:3px">${esc(m.translatedContent)}</div>`:''} ${esc(displayContent)}</div>`:'';
   return`<div class="msg-row ${isU?'user':'bot'}" id="msg_${m.id}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
     ${avHtml}
     <div class="msg-col ${isU?'user':'bot'}">
-      <div class="bubble ${isU?'user':'bot'}" style="min-width:120px;max-width:200px">
+      <div class="bubble ${isU?'user':'bot'}" style="min-width:120px;max-width:200px;${selCls}${opCls}">
         ${voiceBar}
         ${transcriptBtn}
       </div>
@@ -1104,13 +1108,19 @@ async function endCall(){
     window._callCardId=null;
   }
   saveMessages();renderMessages();
-  if(callTranscriptLog.length>0&&currentSession){
+
+  // 保存通话记录（先复制再清空，避免异步问题）
+  const transcriptToSave=[...callTranscriptLog];
+  const durationToSave=callSeconds;
+  const startedAtToSave=callStartedAt;
+  callTranscriptLog=[];callStartedAt=null;
+
+  if(transcriptToSave.length>0&&currentSession){
     fetch(cfg.base.replace(/\/+$/,'')+'/api/call/save',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({session_id:currentSession.id,transcript:callTranscriptLog,duration:callSeconds,started_at:callStartedAt}),
-    }).catch(()=>{});
+      body:JSON.stringify({session_id:currentSession.id,transcript:transcriptToSave,duration:durationToSave,started_at:startedAtToSave}),
+    }).then(r=>r.json()).then(d=>console.log('[通话记录]',d)).catch(e=>console.error('[通话记录失败]',e));
   }
-  callTranscriptLog=[];callStartedAt=null;
 }
 
 async function renderCallRecords(){
@@ -1913,14 +1923,56 @@ function addMem(){const v=document.getElementById('memInp')?.value?.trim();if(!v
 function delMem(i){memories.splice(i,1);save(K.mems,memories);renderPanel('memory');}
 
 function renderFavsPanel(){
-  const items=favs.map((f,i)=>{
-    if(f.type==='single'){const m=f.msg;return`<div class="fav-single"><div style="font-size:10px;color:var(--tf);margin-bottom:5px">${fmtTime(m.savedAt||m.ts)} · ${m.role==='user'?'你':'他'}</div><div style="font-size:12.5px;line-height:1.5">${esc(m.content||'[图片]')}</div><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:10px;margin-top:5px" onclick="delFav(${i})">删除</button></div>`;}
-    const inner=f.collapsed?'':`<div style="border-top:1px solid var(--bd);padding-top:8px;margin-top:8px">${f.msgs.map(m=>`<div style="margin-bottom:7px"><div style="font-size:10px;color:var(--tf);margin-bottom:3px">${m.role==='user'?'你':'他'} · ${fmtTime(m.ts)}</div><div style="background:${m.role==='user'?'#1f1c17':'var(--s1)'};border:1px solid ${m.role==='user'?'rgba(212,165,116,.12)':'var(--bd)'};border-radius:9px;padding:6px 10px;font-size:12.5px;line-height:1.5;display:inline-block;max-width:100%">${esc(m.content)}</div></div>`).join('')}</div>`;
-    return`<div class="fav-group"><div class="fav-group-hdr"><div><span style="font-size:12.5px;font-weight:500;color:var(--ac)">${esc(f.title)}</span><span style="font-size:10px;color:var(--tf);margin-left:7px">${f.msgs.length} 条</span></div><div style="display:flex;gap:5px"><button class="h-btn" onclick="toggleFavGroup(${i})">${f.collapsed?'展开':'折叠'}</button><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:13px" onclick="delFav(${i})">×</button></div></div>${inner}</div>`;
-  }).join('');
+  const singles=favs.filter(f=>f.type==='single');
+  const groups=favs.filter(f=>f.type==='group');
+  const voiceSingles=singles.filter(f=>f.msg.type==='voice');
+  const textSingles=singles.filter(f=>f.msg.type!=='voice');
+
+  function renderFavMsg(m,inGroup=false){
+    if(m.type==='voice'){
+      const hasAudio=!!m.audioUrl;
+      const displayContent=(m.content||'').replace(/^\[语音情绪:[^\]]+\]\s*/,'');
+      return`<div style="background:${m.role==='user'?'#1f1c17':'var(--s1)'};border:1px solid ${m.role==='user'?'rgba(212,165,116,.12)':'var(--bd)'};border-radius:9px;padding:8px 12px;display:inline-block;max-width:100%">
+        <div style="display:flex;align-items:center;gap:6px;cursor:${hasAudio?'pointer':'default'}" onclick="${hasAudio?`playFavVoice('${m.id}','${m.audioUrl}')`:''}">
+          <span style="font-size:14px">${hasAudio?'▶':'🎙'}</span>
+          <div style="display:flex;gap:2px;align-items:center">${[4,7,10,7,4].map(h=>`<div style="width:2px;height:${h}px;background:currentColor;border-radius:1px;opacity:.7"></div>`).join('')}</div>
+        </div>
+        ${displayContent?`<div style="font-size:11px;color:var(--td);margin-top:4px">${esc(displayContent)}</div>`:''}
+      </div>`;
+    }
+    return`<div style="background:${m.role==='user'?'#1f1c17':'var(--s1)'};border:1px solid ${m.role==='user'?'rgba(212,165,116,.12)':'var(--bd)'};border-radius:9px;padding:6px 10px;font-size:12.5px;line-height:1.5;display:inline-block;max-width:100%">${esc(m.content||'[图片]')}</div>`;
+  }
+
+  // 文字类
+  const textHtml=textSingles.length?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">文字</div>${textSingles.map((f,i)=>{
+    const idx=favs.indexOf(f);
+    return`<div class="fav-single"><div style="font-size:10px;color:var(--tf);margin-bottom:5px">${fmtTime(f.msg.savedAt||f.msg.ts)} · ${f.msg.role==='user'?'你':'他'}</div>${renderFavMsg(f.msg)}<div><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:10px;margin-top:5px" onclick="delFav(${idx})">删除</button></div></div>`;
+  }).join('')}</div>`:'';
+
+  // 语音类
+  const voiceHtml=voiceSingles.length?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">语音</div>${voiceSingles.map((f,i)=>{
+    const idx=favs.indexOf(f);
+    return`<div class="fav-single"><div style="font-size:10px;color:var(--tf);margin-bottom:5px">${fmtTime(f.msg.savedAt||f.msg.ts)} · ${f.msg.role==='user'?'你':'他'}</div>${renderFavMsg(f.msg)}<div><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:10px;margin-top:5px" onclick="delFav(${idx})">删除</button></div></div>`;
+  }).join('')}</div>`:'';
+
+  // 组合类
+  const groupHtml=groups.length?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">组合</div>${groups.map((f,i)=>{
+    const idx=favs.indexOf(f);
+    const inner=f.collapsed?'':`<div style="border-top:1px solid var(--bd);padding-top:8px;margin-top:8px">${f.msgs.map(m=>`<div style="margin-bottom:7px"><div style="font-size:10px;color:var(--tf);margin-bottom:3px">${m.role==='user'?'你':'他'} · ${fmtTime(m.ts)}</div>${renderFavMsg(m,true)}</div>`).join('')}</div>`;
+    return`<div class="fav-group"><div class="fav-group-hdr"><div><span style="font-size:12.5px;font-weight:500;color:var(--ac)">${esc(f.title)}</span><span style="font-size:10px;color:var(--tf);margin-left:7px">${f.msgs.length} 条</span></div><div style="display:flex;gap:5px"><button class="h-btn" onclick="toggleFavGroup(${idx})">${f.collapsed?'展开':'折叠'}</button><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:13px" onclick="delFav(${idx})">×</button></div></div>${inner}</div>`;
+  }).join('')}</div>`:'';
+
+  const isEmpty=!favs.length;
   return`<div class="panel-hdr"><span class="panel-title">收藏夹</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-    <p style="font-size:11px;color:var(--td);margin-bottom:10px">单条独立显示，多选打包成可折叠合集</p>
-    ${items||'<p style="font-size:12px;color:var(--tf);text-align:center;padding:20px 0">还没有收藏，右键消息选收藏</p>'}`;
+    ${isEmpty?'<p style="font-size:12px;color:var(--tf);text-align:center;padding:20px 0">还没有收藏，右键消息选收藏</p>':(textHtml+voiceHtml+groupHtml)}`;
+}
+
+let favAudio=null;
+function playFavVoice(id,url){
+  if(favAudio){favAudio.pause();favAudio=null;}
+  if(!url)return;
+  favAudio=new Audio(url);
+  favAudio.play();
 }
 function delFav(i){favs.splice(i,1);save(K.favs,favs);renderPanel('favs');}
 function toggleFavGroup(i){favs[i].collapsed=!favs[i].collapsed;save(K.favs,favs);renderPanel('favs');}
