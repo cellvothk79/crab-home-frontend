@@ -316,7 +316,7 @@ function load(k){try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e)
 function save(k,v){localStorage.setItem(k,JSON.stringify(v))}
 
 // ═══════════ STATE ═══════════
-let cfg=Object.assign({base:'',apiKey:'',apiBase:'',model:'claude-sonnet-4-6',showAvatar:true,tts:false,voiceEnabled:false,ttsChannel:'minimax',presets:[{id:1,name:'中转站',apiBase:'https://api.jiushi.xin/v1',apiKey:'',model:'[按量]claude-sonnet-4-6'},{id:2,name:'官方API',apiBase:'https://api.anthropic.com',apiKey:'',model:'claude-sonnet-4-6'}]},load(K.cfg)||{});
+let cfg=Object.assign({base:'',apiKey:'',apiBase:'',model:'claude-sonnet-4-6',showAvatar:true,tts:false,voiceEnabled:false,ttsChannel:'minimax',ttsLang:'zh',presets:[{id:1,name:'中转站',apiBase:'https://api.jiushi.xin/v1',apiKey:'',model:'[按量]claude-sonnet-4-6'},{id:2,name:'官方API',apiBase:'https://api.anthropic.com',apiKey:'',model:'claude-sonnet-4-6'}]},load(K.cfg)||{});
 let sessions=load(K.sessions)||[];
 let currentSession=null;
 let messages=load(K.msgs)||[];
@@ -642,17 +642,55 @@ function renderMsg(m){
 function renderVoiceMsg(m){
   const isU=m.role==='user';
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
-  const emotionTag=m.emotion?`<span style="font-size:10px;background:rgba(212,165,116,.15);border:1px solid rgba(212,165,116,.3);border-radius:10px;padding:1px 6px;color:var(--ac);margin-left:6px">${m.emotion}</span>`:'';
-  return`<div class="msg-row ${isU?'user':'bot'}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
+  const emotionTag=m.emotion?`<span style="font-size:10px;background:rgba(212,165,116,.15);border:1px solid rgba(212,165,116,.3);border-radius:10px;padding:2px 7px;color:var(--ac)">${m.emotion}</span>`:'';
+  // 语音条：播放按钮 + 波形 + 时长（如果有）
+  const hasAudio=!!m.audioUrl;
+  const voiceBar=`<div onclick="playVoiceMsg(event,'${m.id}')" style="display:flex;align-items:center;gap:6px;cursor:${hasAudio?'pointer':'default'};min-width:80px">
+    <span id="vbtn_${m.id}" style="font-size:15px">${hasAudio?'▶':'🎙'}</span>
+    <div style="display:flex;align-items:center;gap:2px;flex:1">
+      ${[4,7,10,14,10,7,5,8,12,8,5].map(h=>`<div style="width:2px;height:${h}px;background:currentColor;border-radius:1px;opacity:.7"></div>`).join('')}
+    </div>
+  </div>`;
+  // 转写文字折叠显示
+  const transcriptBtn=m.content?`<div style="font-size:11px;color:var(--td);margin-top:4px;cursor:pointer" onclick="toggleVoiceTranscript('${m.id}')">[查看转写文字]</div><div id="vtxt_${m.id}" style="display:none;font-size:12px;color:var(--t);margin-top:4px;padding-top:4px;border-top:1px solid var(--bd)">${esc(m.content)}</div>`:'';
+  return`<div class="msg-row ${isU?'user':'bot'}" id="msg_${m.id}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
     ${avHtml}
     <div class="msg-col ${isU?'user':'bot'}">
-      <div class="bubble ${isU?'user':'bot'}" style="display:flex;align-items:center;gap:8px">
-        <span style="font-size:16px">🎙</span>
-        <span style="font-size:12.5px;white-space:pre-wrap">${esc(m.content)}</span>
-        ${emotionTag}
+      <div class="bubble ${isU?'user':'bot'}" style="min-width:120px;max-width:200px">
+        ${voiceBar}
+        ${emotionTag?`<div style="margin-top:4px">${emotionTag}</div>`:''}
+        ${transcriptBtn}
       </div>
     </div>
   </div>`;
+}
+
+function toggleVoiceTranscript(id){
+  const el=document.getElementById('vtxt_'+id);
+  const btn=el?.previousElementSibling;
+  if(!el)return;
+  const show=el.style.display==='none';
+  el.style.display=show?'block':'none';
+  if(btn)btn.textContent=show?'[收起转写文字]':'[查看转写文字]';
+}
+
+let voicePlayAudio=null;
+function playVoiceMsg(e,msgId){
+  e.stopPropagation();
+  const m=messages.find(m=>m.id===msgId);
+  if(!m?.audioUrl)return;
+  const btn=document.getElementById('vbtn_'+msgId);
+  if(voicePlayAudio&&!voicePlayAudio.paused){
+    voicePlayAudio.pause();
+    voicePlayAudio.currentTime=0;
+    if(btn)btn.textContent='▶';
+    return;
+  }
+  if(voicePlayAudio)voicePlayAudio.pause();
+  voicePlayAudio=new Audio(m.audioUrl);
+  voicePlayAudio.play();
+  if(btn)btn.textContent='⏸';
+  voicePlayAudio.onended=()=>{if(btn)btn.textContent='▶';};
 }
 
 function renderTodoCard(){
@@ -823,17 +861,15 @@ async function send(){
     // 找到比当前最后一条消息更新的消息
     const lastTs=messages.length?messages[messages.length-1].ts:'';
     const newMsgs=(replyData||[]).filter(m=>m.created_at>lastTs&&m.role==='assistant');
-    const msgsToAdd=newMsgs.length?newMsgs.map(m=>({id:m.id.toString(),role:'assistant',content:m.content,innerThought:m.inner_thought||'',ts:m.created_at,type:'text'})):(()=>{const replyMsgs=(typeof data==='object'&&data.messages)||[{content:reply,inner:''}];return replyMsgs.map((rm,i)=>({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner||'',ts:new Date().toISOString(),type:'text'}));})();
+    const msgsToAdd=newMsgs.length?newMsgs.map(m=>({id:m.id.toString(),role:'assistant',content:m.content,innerThought:m.inner_thought||'',ts:m.created_at,type:'text',isVoice:m.is_voice||false})):(()=>{const replyMsgs=(typeof data==='object'&&data.messages)||[{content:reply,inner:'',voice:false}];return replyMsgs.map((rm,i)=>({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner||'',ts:new Date().toISOString(),type:'text',isVoice:rm.voice||false}));})();
 
     // 逐条显示，每条间隔1秒，像真人发微信
     if(msgsToAdd.length<=1){
       if(msgsToAdd.length)messages.push(msgsToAdd[0]);
       saveMessages();renderMessages();
     } else {
-      // 先显示第一条
       messages.push(msgsToAdd[0]);
       saveMessages();renderMessages();
-      // 后续每条延迟1秒显示
       for(let i=1;i<msgsToAdd.length;i++){
         await new Promise(r=>setTimeout(r,1000));
         showTyping();
@@ -841,6 +877,13 @@ async function send(){
         hideTyping();
         messages.push(msgsToAdd[i]);
         saveMessages();renderMessages();
+      }
+    }
+
+    // AI 标记了 [voice] 的消息，自动生成语音气泡
+    for(const msg of msgsToAdd){
+      if(msg.isVoice&&cfg.base){
+        autoGenVoiceBubble(msg);
       }
     }
     // update session name if first message
@@ -904,6 +947,7 @@ async function stopVoiceRec(e){
 
   mediaRecorder.onstop=async()=>{
     const blob=new Blob(audioChunks,{type:'audio/webm'});
+    const audioUrl=URL.createObjectURL(blob); // 保留原始录音 URL
     document.getElementById('voiceOverlay').style.display='none';
 
     if(!cfg.base){
@@ -917,7 +961,6 @@ async function stopVoiceRec(e){
       const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/transcribe',{method:'POST',body:fd});
       const d=await r.json();
       if(d.text){
-        // 把转写文字 + 情绪当成消息发出去
         const voiceMsg={
           id:Date.now().toString(),
           role:'user',
@@ -925,10 +968,10 @@ async function stopVoiceRec(e){
           emotion:d.emotion||'',
           ts:new Date().toISOString(),
           type:'voice',
+          audioUrl, // 保留原始录音，可播放
         };
         messages.push(voiceMsg);
         saveMessages();renderMessages();
-        // 发给 AI
         await sendVoiceMessage(d.text, d.emotion);
       }
     }catch(err){
@@ -978,7 +1021,47 @@ async function sendVoiceMessage(text, emotion){
   }
 }
 
-// ═══════════ TTS 播放 ═══════════
+// AI 自动语音气泡（开启 aiVoiceReply 时调用）
+function guessEmotion(text){
+  if(/哈哈|哈哈哈|😄|😊|开心|好玩|有趣/.test(text))return '开心';
+  if(/啊|！！|!!!|兴奋|太好了/.test(text))return '兴奋';
+  if(/难过|伤心|哭|😢|😭/.test(text))return '难过';
+  if(/累|困|疲惫|😴/.test(text))return '疲惫';
+  if(/宝宝|嘛|呢|撒娇|🥺/.test(text))return '撒娇';
+  if(/不行|不对|别这样|😤/.test(text))return '生气';
+  return '平静';
+}
+async function autoGenVoiceBubble(msg){
+  if(!cfg.base||!msg?.content)return;
+  try{
+    const emotion=guessEmotion(msg.content);
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:msg.content.slice(0,500),emotion,channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh'}),
+    });
+    if(!r.ok)return;
+    const audioBlob=await r.blob();
+    const audioUrl=URL.createObjectURL(audioBlob);
+    // 在对应文字消息下面插入一条语音气泡
+    const voiceBubble={
+      id:msg.id+'_voice',
+      role:'assistant',
+      content:msg.content,
+      ts:msg.ts,
+      type:'voice',
+      audioUrl,
+      emotion,
+    };
+    // 找到文字消息的位置，在其后插入
+    const idx=messages.findIndex(m=>m.id===msg.id);
+    if(idx>=0){messages.splice(idx+1,0,voiceBubble);}
+    else{messages.push(voiceBubble);}
+    saveMessages();renderMessages();
+  }catch(e){
+    console.log('自动语音气泡生成失败:',e.message);
+  }
+}
 let currentAudio=null;
 async function playTTS(e, msgId){
   e.stopPropagation();
@@ -998,21 +1081,11 @@ async function playTTS(e, msgId){
 
   btn.textContent='⏳';
   try{
-    // 简单的情绪判断：根据消息内容猜
-    function guessEmotion(text){
-      if(/哈哈|哈哈哈|😄|😊|开心|好玩|有趣/.test(text))return '开心';
-      if(/啊|！！|!!!|兴奋|太好了/.test(text))return '兴奋';
-      if(/难过|伤心|哭|😢|😭/.test(text))return '难过';
-      if(/累|困|疲惫|😴/.test(text))return '疲惫';
-      if(/宝宝|嘛|呢|撒娇|🥺/.test(text))return '撒娇';
-      if(/不行|不对|别这样|😤/.test(text))return '生气';
-      return '平静';
-    }
     const emotion=m.emotion||guessEmotion(m.content);
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:m.content.slice(0,500),emotion,channel:cfg.ttsChannel||'minimax'}),
+      body:JSON.stringify({text:m.content.slice(0,500),emotion,channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh'}),
     });
     if(!r.ok){
       const err=await r.json().catch(()=>({}));
@@ -1046,18 +1119,39 @@ function hideTyping(){if(typingEl){typingEl.remove();typingEl=null;}}
 // ═══════════ IMAGE ═══════════
 function sendImage(e){
   const f=e.target.files[0];if(!f)return;
+  e.target.value='';
   const url=URL.createObjectURL(f);
-  // convert to base64 for AI
-  const reader=new FileReader();
-  reader.onload=function(ev){
-    const b64=ev.target.result.split(',')[1];
-    const m={id:Date.now().toString(),role:'user',content:'',ts:new Date().toISOString(),type:'image',imageUrl:url,imageBase64:b64,imageMime:f.type||'image/jpeg'};
+
+  // 压缩图片：最大 1200px，quality 0.75，控制 base64 体积
+  const img=new Image();
+  img.onload=function(){
+    const MAX=1200;
+    let w=img.width,h=img.height;
+    if(w>MAX||h>MAX){
+      if(w>h){h=Math.round(h*MAX/w);w=MAX;}
+      else{w=Math.round(w*MAX/h);h=MAX;}
+    }
+    const canvas=document.createElement('canvas');
+    canvas.width=w;canvas.height=h;
+    canvas.getContext('2d').drawImage(img,0,0,w,h);
+    const mime='image/jpeg';
+    const b64=canvas.toDataURL(mime,0.75).split(',')[1];
+    const m={id:Date.now().toString(),role:'user',content:'',ts:new Date().toISOString(),type:'image',imageUrl:url,imageBase64:b64,imageMime:mime};
     messages.push(m);saveMessages();renderMessages();
-    // stage a prompt so user can add their own text, or just send
     document.getElementById('msgInput').focus();
   };
-  reader.readAsDataURL(f);
-  e.target.value='';
+  img.onerror=function(){
+    // fallback：直接读原始文件
+    const reader=new FileReader();
+    reader.onload=function(ev){
+      const b64=ev.target.result.split(',')[1];
+      const m={id:Date.now().toString(),role:'user',content:'',ts:new Date().toISOString(),type:'image',imageUrl:url,imageBase64:b64,imageMime:f.type||'image/jpeg'};
+      messages.push(m);saveMessages();renderMessages();
+      document.getElementById('msgInput').focus();
+    };
+    reader.readAsDataURL(f);
+  };
+  img.src=url;
 }
 
 // ═══════════ LINK ═══════════
@@ -1566,11 +1660,16 @@ function renderSettingsPanel(){
   const tgl=(key,label)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bd)"><span style="font-size:13px">${label}</span><div class="toggle" style="background:${cfg[key]?'var(--ac)':'var(--bd)'}" onclick="toggleCfg('${key}')"><div class="toggle-thumb" style="left:${cfg[key]?21:3}px"></div></div></div>`;
   const annivItems=annivs.map((a,i)=>`<div class="anniv-row"><span style="flex:1">${esc(a.name)}</span><span style="color:var(--td)">${a.date}</span><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:13px" onclick="delAnniv(${i})">×</button></div>`).join('');
   const ttsOptions=['elevenlabs','minimax'].map(v=>`<option value="${v}" ${cfg.ttsChannel===v?'selected':''}>${v==='elevenlabs'?'ElevenLabs':'MiniMax'}</option>`).join('');
+  const ttsLangOptions=['zh','en'].map(v=>`<option value="${v}" ${cfg.ttsLang===v?'selected':''}>${v==='zh'?'中文':'英文'}</option>`).join('');
   return`<div class="panel-hdr"><span class="panel-title">设置</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
     ${tgl('showAvatar','显示头像（两只小螃蟹）')}
     <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bd)">
       <span style="font-size:13px">🔊 语音合成通道</span>
       <select onchange="cfg.ttsChannel=this.value;save(K.cfg,cfg)" style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px">${ttsOptions}</select>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bd)">
+      <span style="font-size:13px">🌐 语音语言</span>
+      <select onchange="cfg.ttsLang=this.value;save(K.cfg,cfg)" style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px">${ttsLangOptions}</select>
     </div>
     <div style="margin-top:14px;margin-bottom:8px;font-size:12px;font-weight:500">后端地址</div>
     <input class="p-inp" id="cfgBase" value="${esc(cfg.base)}" placeholder="https://crab-home-backend.onrender.com">
