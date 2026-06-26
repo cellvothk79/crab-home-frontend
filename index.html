@@ -865,22 +865,27 @@ async function send(){
 
     // 逐条显示，每条间隔1秒，像真人发微信
     if(msgsToAdd.length<=1){
-      if(msgsToAdd.length)messages.push(msgsToAdd[0]);
+      if(msgsToAdd.length){
+        const msg=msgsToAdd[0];
+        if(!msg.isVoice)messages.push(msg);
+      }
       saveMessages();renderMessages();
     } else {
-      messages.push(msgsToAdd[0]);
+      const first=msgsToAdd[0];
+      if(!first.isVoice)messages.push(first);
       saveMessages();renderMessages();
       for(let i=1;i<msgsToAdd.length;i++){
         await new Promise(r=>setTimeout(r,1000));
         showTyping();
         await new Promise(r=>setTimeout(r,600));
         hideTyping();
-        messages.push(msgsToAdd[i]);
+        const msg=msgsToAdd[i];
+        if(!msg.isVoice)messages.push(msg);
         saveMessages();renderMessages();
       }
     }
 
-    // AI 标记了 [voice] 的消息，自动生成语音气泡
+    // AI 标记了 [voice] 的消息，只发语音气泡（不发文字）
     for(const msg of msgsToAdd){
       if(msg.isVoice&&cfg.base){
         autoGenVoiceBubble(msg);
@@ -1267,7 +1272,13 @@ async function showInnerThought(m){
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/generate',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({session_id:currentSession?.id,content:m.content})
+      body:JSON.stringify({
+        session_id:currentSession?.id,
+        content:m.content,
+        api_key:cfg.apiKey,
+        api_base:cfg.apiBase,
+        model:cfg.model,
+      })
     });
     const d=await r.json();
     if(d.mood){
