@@ -928,21 +928,19 @@ function startVoiceRec(e){
   navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
     isRecording=true;
     audioChunks=[];
+    window._recStartTime=Date.now();
     mediaRecorder=new MediaRecorder(stream,{mimeType:'audio/webm'});
     mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
     mediaRecorder.start();
     document.getElementById('voiceStatus').textContent='录音中...';
     document.getElementById('voiceRecordBtn').style.background='#c46';
-    // 波形动画
     waveAnimTimer=setInterval(()=>{
       document.querySelectorAll('.wave-bar').forEach(b=>{
         b.style.height=Math.random()*32+4+'px';
         b.style.opacity='1';
       });
     },150);
-  }).catch(()=>{
-    alert('需要麦克风权限');
-  });
+  }).catch(()=>{alert('需要麦克风权限');});
 }
 
 async function stopVoiceRec(e){
@@ -957,6 +955,12 @@ async function stopVoiceRec(e){
   mediaRecorder.stream.getTracks().forEach(t=>t.stop());
 
   mediaRecorder.onstop=async()=>{
+    const duration=Date.now()-(window._recStartTime||0);
+    if(duration<800){
+      // 录音太短，丢弃
+      document.getElementById('voiceOverlay').style.display='none';
+      return;
+    }
     const blob=new Blob(audioChunks,{type:'audio/webm'});
     const localUrl=URL.createObjectURL(blob);
     document.getElementById('voiceOverlay').style.display='none';
@@ -1771,4 +1775,4 @@ function delAnniv(i){annivs.splice(i,1);save(K.annivs,annivs);renderPanel('setti
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 </script>
 </body>
-</html>嗯
+</html>
