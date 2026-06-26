@@ -38,7 +38,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
 /* select bar */
 .sel-bar{background:rgba(212,165,116,.07);border-bottom:1px solid rgba(212,165,116,.18);padding:5px 12px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--ac)}
 /* messages */
-.msgs{flex:1;overflow-y:auto;padding:9px 11px;display:flex;flex-direction:column}.msgs::-webkit-scrollbar{display:none}
+.msgs{flex:1;overflow-y:auto;padding:9px 11px;display:flex;flex-direction:column}.msgs::-webkit-scrollbar{width:4px}.msgs::-webkit-scrollbar-track{background:transparent}.msgs::-webkit-scrollbar-thumb{background:rgba(212,165,116,.3);border-radius:2px}.msgs::-webkit-scrollbar-thumb:hover{background:rgba(212,165,116,.6)}
 .msg-time{font-size:10px;color:var(--tf);text-align:center;margin:7px 0 3px}
 .msg-row{display:flex;align-items:flex-end;gap:4px;margin-bottom:3px}
 .msg-row.user{flex-direction:row-reverse}
@@ -316,7 +316,7 @@ function load(k){try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e)
 function save(k,v){localStorage.setItem(k,JSON.stringify(v))}
 
 // ═══════════ STATE ═══════════
-let cfg=Object.assign({base:'',apiKey:'',apiBase:'',model:'claude-sonnet-4-6',showAvatar:true,tts:false,voiceEnabled:false,presets:[{id:1,name:'中转站',apiBase:'https://api.jiushi.xin/v1',apiKey:'',model:'[按量]claude-sonnet-4-6'},{id:2,name:'官方API',apiBase:'https://api.anthropic.com',apiKey:'',model:'claude-sonnet-4-6'}]},load(K.cfg)||{});
+let cfg=Object.assign({base:'',apiKey:'',apiBase:'',model:'claude-sonnet-4-6',showAvatar:true,tts:false,voiceEnabled:false,ttsChannel:'minimax',presets:[{id:1,name:'中转站',apiBase:'https://api.jiushi.xin/v1',apiKey:'',model:'[按量]claude-sonnet-4-6'},{id:2,name:'官方API',apiBase:'https://api.anthropic.com',apiKey:'',model:'claude-sonnet-4-6'}]},load(K.cfg)||{});
 let sessions=load(K.sessions)||[];
 let currentSession=null;
 let messages=load(K.msgs)||[];
@@ -1012,7 +1012,7 @@ async function playTTS(e, msgId){
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:m.content.slice(0,500),emotion}),
+      body:JSON.stringify({text:m.content.slice(0,500),emotion,channel:cfg.ttsChannel||'minimax'}),
     });
     if(!r.ok){
       const err=await r.json().catch(()=>({}));
@@ -1028,7 +1028,7 @@ async function playTTS(e, msgId){
     currentAudio.onended=()=>{btn.textContent='🔊';currentAudio=null;};
   }catch(err){
     btn.textContent='🔊';
-    alert('语音播放失败：'+err.message+'\n（ElevenLabs 可能需要充值）');
+    alert('语音播放失败：'+err.message+'\n（可能需要充值或检查API key）');
   }
 }
 let typingEl=null;
@@ -1565,8 +1565,13 @@ async function forceDiary(){
 function renderSettingsPanel(){
   const tgl=(key,label)=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bd)"><span style="font-size:13px">${label}</span><div class="toggle" style="background:${cfg[key]?'var(--ac)':'var(--bd)'}" onclick="toggleCfg('${key}')"><div class="toggle-thumb" style="left:${cfg[key]?21:3}px"></div></div></div>`;
   const annivItems=annivs.map((a,i)=>`<div class="anniv-row"><span style="flex:1">${esc(a.name)}</span><span style="color:var(--td)">${a.date}</span><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:13px" onclick="delAnniv(${i})">×</button></div>`).join('');
+  const ttsOptions=['elevenlabs','minimax'].map(v=>`<option value="${v}" ${cfg.ttsChannel===v?'selected':''}>${v==='elevenlabs'?'ElevenLabs':'MiniMax'}</option>`).join('');
   return`<div class="panel-hdr"><span class="panel-title">设置</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
     ${tgl('showAvatar','显示头像（两只小螃蟹）')}
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bd)">
+      <span style="font-size:13px">🔊 语音合成通道</span>
+      <select onchange="cfg.ttsChannel=this.value;save(K.cfg,cfg)" style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px">${ttsOptions}</select>
+    </div>
     <div style="margin-top:14px;margin-bottom:8px;font-size:12px;font-weight:500">后端地址</div>
     <input class="p-inp" id="cfgBase" value="${esc(cfg.base)}" placeholder="https://crab-home-backend.onrender.com">
     <div style="font-size:12px;font-weight:500;margin-bottom:4px">System Prompt</div><div style="font-size:10px;color:var(--tf);margin-bottom:6px">默认：Claude本体 × 伴侣关系，说话简短自然。可在此修改覆盖。</div>
