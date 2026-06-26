@@ -512,13 +512,13 @@ async function loadMessages(){
   }
   renderMessages();
   checkDiary();
-  // 刷新后，is_voice 但没有 audio_url 的 AI 消息，重新生成语音
+  // 刷新后，is_voice 但没有 audio_url 的 AI 消息，重新生成语音（只处理没有audioUrl的）
   if(cfg.base){
     setTimeout(()=>{
-      messages.filter(m=>m.type==='voice'&&m.role==='assistant'&&!m.audioUrl).forEach(m=>{
+      messages.filter(m=>m.type==='voice'&&m.role==='assistant'&&!m.audioUrl&&!m.id?.includes('_voice')).forEach(m=>{
         autoGenVoiceBubble(m);
       });
-    }, 1500);
+    }, 2000);
   }
 }
 
@@ -1082,6 +1082,20 @@ async function autoGenVoiceBubble(msg){
       const audioBlob=await r.blob();
       audioUrl=URL.createObjectURL(audioBlob);
     }
+    // 检查是否已有语音气泡（防止重复）
+    const existingVoiceIdx=messages.findIndex(m=>m.id===msg.id+'_voice');
+    if(existingVoiceIdx>=0){
+      messages[existingVoiceIdx].audioUrl=audioUrl;
+      saveMessages();renderMessages();
+      return;
+    }
+    // 刷新后 voice 消息本身就是气泡，直接更新 audioUrl
+    const selfIdx=messages.findIndex(m=>m.id===msg.id&&m.type==='voice');
+    if(selfIdx>=0){
+      messages[selfIdx].audioUrl=audioUrl;
+      saveMessages();renderMessages();
+      return;
+    }
     const voiceBubble={
       id:msg.id+'_voice',
       role:'assistant',
@@ -1092,7 +1106,6 @@ async function autoGenVoiceBubble(msg){
       audioUrl,
       emotion,
     };
-    // 找到文字消息的位置，在其后插入
     const idx=messages.findIndex(m=>m.id===msg.id);
     if(idx>=0){messages.splice(idx+1,0,voiceBubble);}
     else{messages.push(voiceBubble);}
@@ -1758,4 +1771,4 @@ function delAnniv(i){annivs.splice(i,1);save(K.annivs,annivs);renderPanel('setti
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 </script>
 </body>
-</html>
+</html>嗯
