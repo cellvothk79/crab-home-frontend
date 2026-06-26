@@ -854,10 +854,10 @@ async function send(){
     }
 
     hideTyping();
-    // 追加 AI 回复到本地消息数组（不重新从后端拉，避免图片消失）
     const replyData = await (async()=>{try{const rr=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=20');const dd=await rr.json();return dd;}catch(e){return [];}})();
-    // 找到比当前最后一条消息更新的消息
-    const lastTs=messages.length?messages[messages.length-1].ts:'';
+    // 取所有消息（含voice）中最后一条的时间戳
+    const allMsgTs=messages.map(m=>m.ts).filter(Boolean);
+    const lastTs=allMsgTs.length?allMsgTs.reduce((a,b)=>a>b?a:b):'';
     const newMsgs=(replyData||[]).filter(m=>m.created_at>lastTs&&m.role==='assistant');
     const msgsToAdd=newMsgs.length?newMsgs.map(m=>({id:m.id.toString(),role:'assistant',content:m.content,innerThought:m.inner_thought||'',ts:m.created_at,type:'text',isVoice:m.is_voice||false})):(()=>{const replyMsgs=(typeof data==='object'&&data.messages)||[{content:reply,inner:'',voice:false}];return replyMsgs.map((rm,i)=>({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner||'',ts:new Date().toISOString(),type:'text',isVoice:rm.voice||false}));})();
 
@@ -950,14 +950,23 @@ async function stopVoiceRec(e){
 
   mediaRecorder.onstop=async()=>{
     const blob=new Blob(audioChunks,{type:'audio/webm'});
-    const audioUrl=URL.createObjectURL(blob); // 保留原始录音 URL
+    const localUrl=URL.createObjectURL(blob);
     document.getElementById('voiceOverlay').style.display='none';
 
-    if(!cfg.base){
-      alert('需要配置后端才能发语音');return;
-    }
+    if(!cfg.base){alert('需要配置后端才能发语音');return;}
 
-    // 上传到后端做 Whisper 转写
+    // 上传录音到后端 Storage 持久化
+    let audioUrl=localUrl;
+    try{
+      const fd2=new FormData();
+      fd2.append('audio',blob,'voice.webm');
+      const uploadRes=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/upload',{method:'POST',body:fd2});
+      if(uploadRes.ok){
+        const uploadData=await uploadRes.json();
+        if(uploadData.audioUrl)audioUrl=uploadData.audioUrl;
+      }
+    }catch(e){console.log('录音上传失败，使用本地URL');}
+
     const fd=new FormData();
     fd.append('audio',blob,'voice.webm');
     try{
@@ -971,11 +980,11 @@ async function stopVoiceRec(e){
           emotion:d.emotion||'',
           ts:new Date().toISOString(),
           type:'voice',
-          audioUrl, // 保留原始录音，可播放
+          audioUrl,
         };
         messages.push(voiceMsg);
         saveMessages();renderMessages();
-        await sendVoiceMessage(d.text, d.emotion);
+        await sendVoiceMessage(d.text, d.emotion, audioUrl);
       }
     }catch(err){
       console.error('语音转写失败:',err);
@@ -994,7 +1003,7 @@ function cancelVoiceRec(){
   document.getElementById('voiceOverlay').style.display='none';
 }
 
-async function sendVoiceMessage(text, emotion){
+async function sendVoiceMessage(text, emotion, audioUrl){
   if(!currentSession||!cfg.base)return;
   showTyping();
   try{
@@ -1004,6 +1013,7 @@ async function sendVoiceMessage(text, emotion){
       content:emotionNote+text,
       model:cfg.model,
       is_voice:true,
+      audio_url:audioUrl||null,
     };
     if(cfg.apiKey)body.api_key=cfg.apiKey;
     if(cfg.apiBase)body.api_base=cfg.apiBase;
