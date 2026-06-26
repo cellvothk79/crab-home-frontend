@@ -572,13 +572,14 @@ async function loadMoreMessages(){
     }
     const older=data.map(m=>({
       id:m.id.toString(),
-      role:m.role,
+      role:m.role==='call_card'?'system':m.role,
       content:m.content,
       innerThought:m.inner_thought||'',
       ts:m.created_at,
-      type:m.is_voice?'voice':'text',
+      type:m.role==='call_card'?'call-card':(m.is_voice?'voice':'text'),
       imageUrl:null,
       audioUrl:m.audio_url||null,
+      callActive:false,
     }));
     messages=[...older,...messages];
     window._oldestMsgTs=older[0].ts;
@@ -1132,13 +1133,16 @@ async function sendCallMessage(text){
     const reader=r.body.getReader();
     const decoder=new TextDecoder();
     let fullReply='';
+    let sseBuf=''; // SSE 缓冲，处理跨 chunk 的数据
 
     while(true){
       const {done,value}=await reader.read();
       if(done)break;
-      const chunk=decoder.decode(value);
-      const lines=chunk.split('\n');
-      for(const line of lines){
+      sseBuf+=decoder.decode(value,{stream:true});
+      // 按完整行处理
+      const parts=sseBuf.split('\n');
+      sseBuf=parts.pop()||''; // 最后一段可能不完整，留到下次
+      for(const line of parts){
         if(!line.startsWith('data: '))continue;
         try{
           const evt=JSON.parse(line.slice(6));
@@ -1154,6 +1158,14 @@ async function sendCallMessage(text){
           }
         }catch(e){}
       }
+    }
+    // 处理缓冲区剩余
+    if(sseBuf.startsWith('data: ')){
+      try{
+        const evt=JSON.parse(sseBuf.slice(6));
+        if(evt.type==='audio')enqueueAudio(evt.audio,evt.format||'mp3');
+        if(evt.type==='done')fullReply=evt.fullReply||fullReply;
+      }catch(e){}
     }
 
     if(fullReply){
