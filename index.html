@@ -497,8 +497,9 @@ async function loadMessages(){
         content:m.content,
         innerThought:m.inner_thought||'',
         ts:m.created_at,
-        type:'text',
+        type:m.is_voice?'voice':'text',
         imageUrl:null,
+        // audioUrl 刷新后失效，语音气泡显示但不能播放（波形显示🎙而非▶）
       }));
       // 记录最早消息的时间戳，用于加载更多
       window._oldestMsgTs=messages.length?messages[0].ts:null;
@@ -534,7 +535,7 @@ async function loadMoreMessages(){
       content:m.content,
       innerThought:m.inner_thought||'',
       ts:m.created_at,
-      type:'text',
+      type:m.is_voice?'voice':'text',
       imageUrl:null,
     }));
     messages=[...older,...messages];
@@ -642,8 +643,6 @@ function renderMsg(m){
 function renderVoiceMsg(m){
   const isU=m.role==='user';
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
-  const emotionTag=m.emotion?`<span style="font-size:10px;background:rgba(212,165,116,.15);border:1px solid rgba(212,165,116,.3);border-radius:10px;padding:2px 7px;color:var(--ac)">${m.emotion}</span>`:'';
-  // 语音条：播放按钮 + 波形 + 时长（如果有）
   const hasAudio=!!m.audioUrl;
   const voiceBar=`<div onclick="playVoiceMsg(event,'${m.id}')" style="display:flex;align-items:center;gap:6px;cursor:${hasAudio?'pointer':'default'};min-width:80px">
     <span id="vbtn_${m.id}" style="font-size:15px">${hasAudio?'▶':'🎙'}</span>
@@ -651,14 +650,12 @@ function renderVoiceMsg(m){
       ${[4,7,10,14,10,7,5,8,12,8,5].map(h=>`<div style="width:2px;height:${h}px;background:currentColor;border-radius:1px;opacity:.7"></div>`).join('')}
     </div>
   </div>`;
-  // 转写文字折叠显示
   const transcriptBtn=m.content?`<div style="font-size:11px;color:var(--td);margin-top:4px;cursor:pointer" onclick="toggleVoiceTranscript('${m.id}')">[查看转写文字]</div><div id="vtxt_${m.id}" style="display:none;font-size:12px;color:var(--t);margin-top:4px;padding-top:4px;border-top:1px solid var(--bd)">${esc(m.content)}</div>`:'';
   return`<div class="msg-row ${isU?'user':'bot'}" id="msg_${m.id}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
     ${avHtml}
     <div class="msg-col ${isU?'user':'bot'}">
       <div class="bubble ${isU?'user':'bot'}" style="min-width:120px;max-width:200px">
         ${voiceBar}
-        ${emotionTag?`<div style="margin-top:4px">${emotionTag}</div>`:''}
         ${transcriptBtn}
       </div>
     </div>
@@ -1005,6 +1002,7 @@ async function sendVoiceMessage(text, emotion){
       session_id:currentSession.id,
       content:emotionNote+text,
       model:cfg.model,
+      is_voice:true,
     };
     if(cfg.apiKey)body.api_key=cfg.apiKey;
     if(cfg.apiBase)body.api_base=cfg.apiBase;
@@ -1046,8 +1044,16 @@ async function autoGenVoiceBubble(msg){
       body:JSON.stringify({text:msg.content.slice(0,500),emotion,channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh'}),
     });
     if(!r.ok)return;
-    const audioBlob=await r.blob();
-    const audioUrl=URL.createObjectURL(audioBlob);
+    const contentType=r.headers.get('content-type')||'';
+    let audioUrl;
+    if(contentType.includes('application/json')){
+      const d=await r.json();
+      if(!d.audioUrl)return;
+      audioUrl=d.audioUrl;
+    } else {
+      const audioBlob=await r.blob();
+      audioUrl=URL.createObjectURL(audioBlob);
+    }
     // 在对应文字消息下面插入一条语音气泡
     const voiceBubble={
       id:msg.id+'_voice',
@@ -1096,11 +1102,19 @@ async function playTTS(e, msgId){
       const err=await r.json().catch(()=>({}));
       throw new Error(err.error||'TTS 失败');
     }
-    const audioBlob=await r.blob();
-    const url=URL.createObjectURL(audioBlob);
-    m.audioUrl=url; // 缓存
+    const contentType=r.headers.get('content-type')||'';
+    let audioUrl;
+    if(contentType.includes('application/json')){
+      const d=await r.json();
+      if(d.audioUrl){audioUrl=d.audioUrl;}
+      else throw new Error(d.error||'TTS 失败');
+    } else {
+      const audioBlob=await r.blob();
+      audioUrl=URL.createObjectURL(audioBlob);
+    }
+    m.audioUrl=audioUrl;
     if(currentAudio){currentAudio.pause();currentAudio=null;}
-    currentAudio=new Audio(url);
+    currentAudio=new Audio(audioUrl);
     currentAudio.play();
     btn.textContent='⏸';
     currentAudio.onended=()=>{btn.textContent='🔊';currentAudio=null;};
