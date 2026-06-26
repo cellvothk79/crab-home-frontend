@@ -499,7 +499,7 @@ async function loadMessages(){
         ts:m.created_at,
         type:m.is_voice?'voice':'text',
         imageUrl:null,
-        // audioUrl 刷新后失效，语音气泡显示但不能播放（波形显示🎙而非▶）
+        audioUrl:m.audio_url||null,
       }));
       // 记录最早消息的时间戳，用于加载更多
       window._oldestMsgTs=messages.length?messages[0].ts:null;
@@ -537,6 +537,7 @@ async function loadMoreMessages(){
       ts:m.created_at,
       type:m.is_voice?'voice':'text',
       imageUrl:null,
+      audioUrl:m.audio_url||null,
     }));
     messages=[...older,...messages];
     window._oldestMsgTs=older[0].ts;
@@ -650,7 +651,7 @@ function renderVoiceMsg(m){
       ${[4,7,10,14,10,7,5,8,12,8,5].map(h=>`<div style="width:2px;height:${h}px;background:currentColor;border-radius:1px;opacity:.7"></div>`).join('')}
     </div>
   </div>`;
-  const transcriptBtn=m.content?`<div style="font-size:11px;color:var(--td);margin-top:4px;cursor:pointer" onclick="toggleVoiceTranscript('${m.id}')">[查看转写文字]</div><div id="vtxt_${m.id}" style="display:none;font-size:12px;color:var(--t);margin-top:4px;padding-top:4px;border-top:1px solid var(--bd)">${esc(m.content)}</div>`:'';
+  const transcriptBtn=m.content?`<div style="font-size:11px;color:var(--td);margin-top:4px;cursor:pointer" onclick="toggleVoiceTranscript('${m.id}')">[查看转写文字]</div><div id="vtxt_${m.id}" style="display:none;font-size:12px;color:var(--t);margin-top:4px;padding-top:4px;border-top:1px solid var(--bd)">${m.translatedContent?`<div style="color:var(--ac);margin-bottom:3px">${esc(m.translatedContent)}</div>`:''} ${esc(m.content)}</div>`:'';
   return`<div class="msg-row ${isU?'user':'bot'}" id="msg_${m.id}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
     ${avHtml}
     <div class="msg-col ${isU?'user':'bot'}">
@@ -1050,15 +1051,24 @@ async function autoGenVoiceBubble(msg){
       const d=await r.json();
       if(!d.audioUrl)return;
       audioUrl=d.audioUrl;
+      if(d.translatedText)msg._translatedText=d.translatedText;
+      // 把 audioUrl 存回数据库，刷新后还能播放
+      if(msg.id&&!msg.id.includes('_voice')){
+        fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+msg.id+'/audio',{
+          method:'PATCH',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({audio_url:audioUrl}),
+        }).catch(()=>{});
+      }
     } else {
       const audioBlob=await r.blob();
       audioUrl=URL.createObjectURL(audioBlob);
     }
-    // 在对应文字消息下面插入一条语音气泡
     const voiceBubble={
       id:msg.id+'_voice',
       role:'assistant',
       content:msg.content,
+      translatedContent:msg._translatedText||null,
       ts:msg.ts,
       type:'voice',
       audioUrl,
