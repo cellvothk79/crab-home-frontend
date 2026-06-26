@@ -1048,8 +1048,10 @@ async function sendCallMessage(text){
     const reply=(data.messages?.[0]?.content)||data.content||'';
     if(!reply)throw new Error('空回复');
     callTranscriptLog.push({role:'assistant',content:reply,ts:new Date().toISOString()});
-    setCallStatus('他在说...');animateCallWave(true);
+    setCallStatus('他：'+reply.slice(0,30)+(reply.length>30?'...':''));
+    animateCallWave(true);
     await playCallTTS(reply);
+    setCallStatus('在听...');
   }catch(e){
     console.error('通话消息失败:',e.message);
     setCallStatus('出错了，继续说...');
@@ -1064,7 +1066,7 @@ async function playCallTTS(text){
     try{
       const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
         method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text:text.slice(0,300),emotion:guessEmotion(text),channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh'}),
+        body:JSON.stringify({text:text.slice(0,300),emotion:guessEmotion(text),channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh',call_mode:true}),
       });
       if(!r.ok){resolve();return;}
       const ct=r.headers.get('content-type')||'';
