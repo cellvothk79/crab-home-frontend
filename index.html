@@ -512,6 +512,14 @@ async function loadMessages(){
   }
   renderMessages();
   checkDiary();
+  // 刷新后，is_voice 但没有 audio_url 的 AI 消息，重新生成语音
+  if(cfg.base){
+    setTimeout(()=>{
+      messages.filter(m=>m.type==='voice'&&m.role==='assistant'&&!m.audioUrl).forEach(m=>{
+        autoGenVoiceBubble(m);
+      });
+    }, 1500);
+  }
 }
 
 async function loadMoreMessages(){
@@ -855,11 +863,11 @@ async function send(){
 
     hideTyping();
     const replyData = await (async()=>{try{const rr=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=20');const dd=await rr.json();return dd;}catch(e){return [];}})();
-    // 取所有消息（含voice）中最后一条的时间戳
-    const allMsgTs=messages.map(m=>m.ts).filter(Boolean);
-    const lastTs=allMsgTs.length?allMsgTs.reduce((a,b)=>a>b?a:b):'';
+    // 取非voice气泡消息里最后一条的时间戳（voice气泡是本地生成的，ts可能不准）
+    const realMsgs=messages.filter(m=>!m.id?.includes('_voice'));
+    const lastTs=realMsgs.length?realMsgs[realMsgs.length-1].ts:'';
     const newMsgs=(replyData||[]).filter(m=>m.created_at>lastTs&&m.role==='assistant');
-    const msgsToAdd=newMsgs.length?newMsgs.map(m=>({id:m.id.toString(),role:'assistant',content:m.content,innerThought:m.inner_thought||'',ts:m.created_at,type:'text',isVoice:m.is_voice||false})):(()=>{const replyMsgs=(typeof data==='object'&&data.messages)||[{content:reply,inner:'',voice:false}];return replyMsgs.map((rm,i)=>({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner||'',ts:new Date().toISOString(),type:'text',isVoice:rm.voice||false}));})();
+    const msgsToAdd=newMsgs.length?newMsgs.map(m=>({id:m.id.toString(),role:'assistant',content:m.content,innerThought:m.inner_thought||'',ts:m.created_at,type:'text',isVoice:m.is_voice||false,audioUrl:m.audio_url||null})):(()=>{const replyMsgs=(typeof data==='object'&&data.messages)||[{content:reply,inner:'',voice:false}];return replyMsgs.map((rm,i)=>({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner||'',ts:new Date().toISOString(),type:'text',isVoice:rm.voice||false}));})();
 
     // 逐条显示，每条间隔1秒，像真人发微信
     if(msgsToAdd.length<=1){
@@ -883,7 +891,7 @@ async function send(){
       }
     }
 
-    // AI 标记了 [voice] 的消息，只发语音气泡（不发文字）
+    // AI 标记了 [voice] 的消息，只发语音气泡
     for(const msg of msgsToAdd){
       if(msg.isVoice&&cfg.base){
         autoGenVoiceBubble(msg);
