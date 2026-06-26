@@ -97,6 +97,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
 .ic-btn.active{background:var(--acl);border:1px solid var(--acb);color:var(--ac)}
 .ic-btn.rec{background:rgba(200,80,80,.15);border:1px solid #c46;color:#c46;animation:pulse 1s infinite}
 @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+@keyframes cwave{0%,100%{height:4px;opacity:.4}50%{height:20px;opacity:1}}
 .ta{flex:1;resize:none;border:1px solid var(--bd);border-radius:11px;padding:7px 10px;min-height:35px;max-height:90px;background:var(--bg);color:var(--t);font-size:14px;font-family:var(--f);line-height:1.4;outline:none}
 .ta:focus{border-color:var(--ac)}
 .send-btn{width:33px;height:33px;flex-shrink:0;border:none;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:.15s}
@@ -178,6 +179,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
       <button class="sb-btn" onclick="openPanel('memory')">记忆</button>
       <button class="sb-btn" onclick="openPanel('favs')">收藏</button>
       <button class="sb-btn" onclick="openPanel('diary')">日记</button>
+      <button class="sb-btn" onclick="openPanel('calls')">通话</button>
       <button class="sb-btn" onclick="openPanel('settings')">设置</button>
     </div>
   </div>
@@ -191,6 +193,7 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
         </div>
       </div>
       <button class="preset-btn" id="presetBtn" onclick="openPanel('preset')">加载中...</button>
+      <button class="ic-btn normal" onclick="startCall()" id="callBtn" title="打电话" style="margin-left:6px">📞</button>
     </div>
     <div id="selBar" class="sel-bar" style="display:none">
       <span id="selCount">已选 0 条</span>
@@ -236,6 +239,22 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
 <!-- Panels -->
 <div class="overlay" id="overlay" onclick="closePanel()" style="display:none">
 <div class="panel" onclick="event.stopPropagation()" id="panelContent"></div>
+</div>
+
+<!-- 通话悬浮小窗 -->
+<div id="callWindow" style="display:none;position:fixed;z-index:500;bottom:100px;right:16px;width:200px;background:var(--s2);border:1px solid rgba(212,165,116,.4);border-radius:16px;padding:16px;box-shadow:0 4px 20px rgba(0,0,0,.4);cursor:move;user-select:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <span style="font-size:12px;color:var(--ac);font-weight:500">🦀 通话中</span>
+    <span id="callTimer" style="font-size:11px;color:var(--td)">00:00</span>
+  </div>
+  <div id="callStatus" style="font-size:12px;color:var(--td);text-align:center;min-height:20px;margin-bottom:12px">等待中...</div>
+  <div id="callWave" style="height:32px;display:flex;align-items:center;justify-content:center;gap:3px;margin-bottom:12px">
+    ${[4,6,10,14,10,6,4].map(h=>`<div class="cwave" style="width:3px;height:${h}px;background:var(--ac);border-radius:2px;opacity:.4;transition:.1s"></div>`).join('')}
+  </div>
+  <div style="display:flex;justify-content:center">
+    <button onclick="endCall()" style="background:#c46;border:none;border-radius:50%;width:44px;height:44px;font-size:20px;cursor:pointer">📵</button>
+  </div>
+  <div id="callTranscript" style="margin-top:10px;max-height:80px;overflow-y:auto;font-size:11px;color:var(--td);display:none"></div>
 </div>
 
 <!-- 录音弹窗 -->
@@ -911,7 +930,264 @@ async function send(){
   }finally{streaming=false;}
 }
 
-// ═══════════ VOICE RECORDING ═══════════
+// ═══════════════════════════════════════
+//  通话系统
+// ═══════════════════════════════════════
+let callActive=false;
+let callRecognition=null;
+let callTimerInterval=null;
+let callSeconds=0;
+let callSilenceTimer=null;
+let callTranscriptLog=[];
+let callSpeaking=false; // AI正在说话时不监听
+
+let callStartedAt=null;
+
+function startCall(){
+  if(callActive)return;
+  if(!cfg.base){alert('需要配置后端');return;}
+  if(!('SpeechRecognition' in window||'webkitSpeechRecognition' in window)){
+    alert('你的浏览器不支持语音识别，请使用 Chrome 或安卓 Chrome');return;
+  }
+  callActive=true;
+  callTranscriptLog=[];
+  callSeconds=0;
+  callStartedAt=new Date().toISOString();
+  document.getElementById('callWindow').style.display='block';
+  document.getElementById('callBtn').style.color='var(--ac)';
+  // 计时器
+  callTimerInterval=setInterval(()=>{
+    callSeconds++;
+    const m=String(Math.floor(callSeconds/60)).padStart(2,'0');
+    const s=String(callSeconds%60).padStart(2,'0');
+    document.getElementById('callTimer').textContent=`${m}:${s}`;
+  },1000);
+  // 拖动小窗
+  makeDraggable(document.getElementById('callWindow'));
+  setCallStatus('在听...');
+  startListening();
+}
+
+function setCallStatus(txt){
+  document.getElementById('callStatus').textContent=txt;
+}
+
+function animateCallWave(active){
+  document.querySelectorAll('.cwave').forEach((el,i)=>{
+    el.style.animation=active?`cwave ${0.4+i*0.08}s ease-in-out infinite`:'none';
+    el.style.opacity=active?'1':'0.4';
+    el.style.height=active?null:'4px';
+  });
+}
+
+function startListening(){
+  if(!callActive||callSpeaking)return;
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  callRecognition=new SR();
+  callRecognition.lang='zh-CN';
+  callRecognition.continuous=false;
+  callRecognition.interimResults=true;
+
+  let finalText='';
+  let interimText='';
+
+  callRecognition.onstart=()=>{
+    setCallStatus('在听...');
+    animateCallWave(false);
+  };
+
+  callRecognition.onresult=(e)=>{
+    interimText='';finalText='';
+    for(const r of e.results){
+      if(r.isFinal)finalText+=r[0].transcript;
+      else interimText+=r[0].transcript;
+    }
+    if(interimText||finalText){
+      setCallStatus('你：'+(finalText||interimText));
+      animateCallWave(true);
+    }
+    // 停顿检测：有内容后1.5秒没新内容就发送
+    clearTimeout(callSilenceTimer);
+    if(finalText){
+      callSilenceTimer=setTimeout(()=>sendCallMessage(finalText),1500);
+    }
+  };
+
+  callRecognition.onerror=(e)=>{
+    if(e.error==='no-speech'&&callActive){
+      setTimeout(startListening,500);
+    }
+  };
+
+  callRecognition.onend=()=>{
+    if(callActive&&!callSpeaking){
+      setTimeout(startListening,300);
+    }
+  };
+
+  try{callRecognition.start();}catch(e){}
+}
+
+async function sendCallMessage(text){
+  if(!callActive||!text.trim())return;
+  clearTimeout(callSilenceTimer);
+  if(callRecognition){try{callRecognition.stop();}catch(e){}}
+
+  callTranscriptLog.push({role:'user',content:text,ts:new Date().toISOString()});
+  addCallTranscript('你',text);
+  setCallStatus('他在想...');
+  animateCallWave(false);
+  callSpeaking=true;
+
+  try{
+    const body={
+      session_id:currentSession?.id,
+      content:'[通话中] '+text,
+      model:cfg.model,
+      is_voice:true,
+      call_mode:true,
+    };
+    if(cfg.apiKey)body.api_key=cfg.apiKey;
+    if(cfg.apiBase)body.api_base=cfg.apiBase;
+
+    const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body),
+    });
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    const reply=(data.messages?.[0]?.content)||data.content||'';
+    if(!reply)throw new Error('空回复');
+
+    callTranscriptLog.push({role:'assistant',content:reply,ts:new Date().toISOString()});
+    addCallTranscript('他',reply);
+
+    // TTS 播放回复
+    setCallStatus('他在说...');
+    animateCallWave(true);
+    await playCallTTS(reply);
+  }catch(e){
+    console.error('通话消息失败:',e.message);
+    setCallStatus('出错了，继续说...');
+  }finally{
+    callSpeaking=false;
+    if(callActive)startListening();
+  }
+}
+
+async function playCallTTS(text){
+  return new Promise(async(resolve)=>{
+    try{
+      const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:text.slice(0,300),emotion:guessEmotion(text),channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh'}),
+      });
+      if(!r.ok){resolve();return;}
+      const ct=r.headers.get('content-type')||'';
+      let audioUrl;
+      if(ct.includes('application/json')){
+        const d=await r.json();
+        audioUrl=d.audioUrl;
+      } else {
+        audioUrl=URL.createObjectURL(await r.blob());
+      }
+      if(!audioUrl){resolve();return;}
+      const audio=new Audio(audioUrl);
+      audio.onended=resolve;
+      audio.onerror=resolve;
+      audio.play();
+      animateCallWave(true);
+    }catch(e){resolve();}
+  });
+}
+
+function addCallTranscript(who,text){
+  const box=document.getElementById('callTranscript');
+  box.style.display='block';
+  const line=document.createElement('div');
+  line.style.cssText='padding:2px 0;border-bottom:1px solid var(--bd)';
+  line.innerHTML=`<span style="color:${who==='他'?'var(--ac)':'var(--t)'};font-size:10px">${who}：</span><span style="font-size:11px">${esc(text.slice(0,50))}${text.length>50?'...':''}</span>`;
+  box.appendChild(line);
+  box.scrollTop=box.scrollHeight;
+}
+
+async function endCall(){
+  if(!callActive)return;
+  callActive=false;
+  callSpeaking=false;
+  clearTimeout(callSilenceTimer);
+  clearInterval(callTimerInterval);
+  if(callRecognition){try{callRecognition.stop();}catch(e){}}
+  document.getElementById('callWindow').style.display='none';
+  document.getElementById('callBtn').style.color='';
+  animateCallWave(false);
+
+  // 保存通话记录到数据库
+  if(callTranscriptLog.length>0&&currentSession){
+    fetch(cfg.base.replace(/\/+$/,'')+'/api/call/save',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        session_id:currentSession.id,
+        transcript:callTranscriptLog,
+        duration:callSeconds,
+        started_at:callStartedAt,
+      }),
+    }).catch(()=>{});
+  }
+  callTranscriptLog=[];
+  callStartedAt=null;
+}
+
+// 通话记录面板（从数据库拉取）
+async function renderCallRecords(){
+  if(!cfg.base||!currentSession)return;
+  const res=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records?session_id='+currentSession.id).catch(()=>null);
+  if(!res||!res.ok)return;
+  const records=await res.json();
+  const el=document.getElementById('callRecordList');
+  if(!el)return;
+  if(!records.length){el.innerHTML='<div style="color:var(--td);font-size:12px;padding:12px 0">还没有通话记录</div>';return;}
+  el.innerHTML=records.map(r=>{
+    const d=new Date(r.started_at);
+    const dateStr=d.toLocaleDateString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const dur=`${Math.floor(r.duration/60)}:${String(r.duration%60).padStart(2,'0')}`;
+    return`<div style="padding:10px 0;border-bottom:1px solid var(--bd);cursor:pointer" onclick="toggleCallDetail('cd_${r.id}')">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:12px;color:var(--t)">${dateStr}</span>
+        <span style="font-size:11px;color:var(--td)">${dur}</span>
+      </div>
+      <div id="cd_${r.id}" style="display:none;margin-top:6px;font-size:11px;color:var(--td);line-height:1.6">
+        ${(r.transcript||[]).map(m=>`<div><span style="color:${m.role==='user'?'var(--t)':'var(--ac)'}">${m.role==='user'?'你':'他'}：</span>${esc(m.content)}</div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+function toggleCallDetail(id){
+  const el=document.getElementById(id);
+  if(el)el.style.display=el.style.display==='none'?'block':'none';
+}
+
+// 小窗拖动
+function makeDraggable(el){
+  let ox=0,oy=0,sx=0,sy=0;
+  el.onmousedown=el.ontouchstart=function(e){
+    const p=e.touches?e.touches[0]:e;
+    sx=p.clientX;sy=p.clientY;
+    ox=el.offsetLeft;oy=el.offsetTop;
+    document.onmousemove=document.ontouchmove=function(e2){
+      const p2=e2.touches?e2.touches[0]:e2;
+      const dx=p2.clientX-sx,dy=p2.clientY-sy;
+      el.style.left=(ox+dx)+'px';el.style.top=(oy+dy)+'px';
+      el.style.right='auto';el.style.bottom='auto';
+    };
+    document.onmouseup=document.ontouchend=function(){
+      document.onmousemove=document.ontouchmove=null;
+    };
+  };
+}
 let mediaRecorder=null;
 let audioChunks=[];
 let isRecording=false;
@@ -1412,7 +1688,15 @@ function renderPanel(name){
   else if(name==='memory'){renderMemPanel();}
   else if(name==='favs')el.innerHTML=renderFavsPanel();
   else if(name==='diary'){renderDiaryPanel();}
+  else if(name==='calls'){renderCallsPanel();}
   else if(name==='settings')el.innerHTML=renderSettingsPanel();
+}
+
+function renderCallsPanel(){
+  const el=document.getElementById('panelContent');
+  el.innerHTML=`<div class="panel-hdr"><span class="panel-title">通话记录</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+  <div id="callRecordList" style="padding:0 4px"><div style="color:var(--td);font-size:12px;padding:12px 0">加载中...</div></div>`;
+  renderCallRecords();
 }
 
 function renderPresetPanel(){
