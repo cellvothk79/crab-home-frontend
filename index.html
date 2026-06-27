@@ -979,9 +979,58 @@ let vadRecorder = null, vadChunks = [];
 let isDetectingSpeech = false, vadSilenceTimer = null, vadAnimFrame = null;
 const VAD_THRESHOLD = 8; 
 
+// 👉 新增：用于解锁手机声音和画中画悬浮窗的全局变量
+let audioUnlocked = false;
+let pipCanvas=null, pipCtx=null, pipVideo=null;
+
+function setupPiP() {
+  if(!document.pictureInPictureEnabled || pipVideo) return;
+  pipCanvas = document.createElement('canvas');
+  pipCanvas.width = 300; pipCanvas.height = 300;
+  pipCtx = pipCanvas.getContext('2d');
+  pipVideo = document.createElement('video');
+  pipVideo.muted = true; pipVideo.playsInline = true; pipVideo.autoplay = true;
+  pipVideo.srcObject = pipCanvas.captureStream(10);
+  pipVideo.play().catch(()=>{});
+}
+
+function updatePiP(status) {
+  if(!pipCtx) return;
+  pipCtx.fillStyle = '#1e1d23'; pipCtx.fillRect(0,0,300,300);
+  pipCtx.font = '80px Arial'; pipCtx.textAlign = 'center'; pipCtx.fillText('🦀', 150, 130);
+  pipCtx.font = '24px Arial'; pipCtx.fillStyle = '#d4a574'; pipCtx.fillText('我们的家', 150, 180);
+  pipCtx.font = '18px Arial'; pipCtx.fillStyle = '#7d7a72'; pipCtx.fillText(status, 150, 240);
+  
+  // 👉 顺便设置锁屏界面的媒体控制通知
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: '🦀 我们的家', artist: status, album: '语音通话' });
+  }
+}
+
+function setCallStatus(txt){
+  const el = document.getElementById('callStatus');
+  if(el) el.textContent = txt;
+  updatePiP(txt); // 状态更新时同步给悬浮窗
+}
+
 function startCall(){
   if(callActive)return;
   if(!cfg.base){alert('需要配置后端');return;}
+  
+  // 👉 核心修复：趁着手指点击拨打的瞬间，立刻放一段静音解锁手机音频权限！
+  if(!audioUnlocked) {
+    const silent = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjEyLjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIAD+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+AAAAAExhdmM1OC4xMgAAAAAAAAAAAAAAACQAAAAAAAAAAAEgAEiAAAAB//OEAAAAAEMASAAAAAAAQAEAAQAAAEAAoB4AAgCBAgIBAQEBAgIBAQEBAQICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA=');
+    silent.play().catch(()=>{});
+    audioUnlocked = true;
+  }
+  
+  // 👉 核心新增：开启画中画悬浮窗
+  setupPiP();
+  updatePiP('准备接通...');
+  if(pipVideo && document.pictureInPictureEnabled) {
+      pipVideo.requestPictureInPicture().catch(()=>{});
+  }
+
   document.getElementById('incomingCall').style.display='block';
   document.getElementById('ringStatus').textContent='响铃中...';
   const delay=2000+Math.random()*2000;
@@ -1016,6 +1065,7 @@ function acceptCall(){
 function rejectCall(){
   clearTimeout(ringTimer);
   document.getElementById('incomingCall').style.display='none';
+  if(document.pictureInPictureElement) document.exitPictureInPicture().catch(()=>{});
 }
 
 function setCallStatus(txt){const el=document.getElementById('callStatus');if(el)el.textContent=txt;}
