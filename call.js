@@ -133,10 +133,10 @@ function startListening(){
   const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth <= 768;
   const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
   
-  // 电脑走原生，手机走 VAD
   if(SR && !isMobile) {
     callRecognition=new SR();
-    callRecognition.lang='zh-CN';
+    // 👇 顺手加个优化：如果你设了英文，这里也能听懂英文了！
+    callRecognition.lang = cfg.ttsLang === 'en' ? 'en-US' : 'zh-CN'; 
     callRecognition.continuous=false;
     callRecognition.interimResults=true;
     let finalText='';
@@ -149,13 +149,20 @@ function startListening(){
       clearTimeout(callSilenceTimer);
       if(finalText)callSilenceTimer=setTimeout(()=>sendCallMessage(finalText),1500);
     };
-    callRecognition.onerror=(e)=>{ if(callActive&&!callSpeaking)setTimeout(startListening,500); };
-    callRecognition.onend=()=>{ if(callActive&&!callSpeaking)setTimeout(startListening,300); };
-    try{callRecognition.start();}catch(e){}
+    callRecognition.onerror=(e)=>{ if(callActive&&!callSpeaking)setTimeout(startListening,1000); };
+    callRecognition.onend=()=>{ if(callActive&&!callSpeaking)setTimeout(startListening,500); };
+    
+    // 👇 核心修复 3：加入抢救机制！如果麦克风崩溃，1秒后强制重启，绝对不死机！
+    try{ 
+        callRecognition.start(); 
+    } catch(e) { 
+        setTimeout(startListening, 1000); 
+    }
   } else {
     startVADListening();
   }
 }
+
 
 async function startVADListening() {
   if(vadStream) return;
@@ -268,15 +275,19 @@ async function processVADAudio() {
   }
 }
 
-const FILLER_WORDS=['嗯…','让我想想','这个嘛…','嗯嗯'];
+const FILLER_WORDS=['嗯…','嗯嗯'];
+// 👇 修复 1：根据中英文模式，动态加载对应的垫音
 let fillerAudios={};
 async function preloadFillers(){
   if(!cfg.base)return;
-  for(const word of FILLER_WORDS){
+  // 英文就用 Um, 中文就用 嗯
+  const words = cfg.ttsLang === 'en' ? ['Um...', 'Let me think...', 'Well...', 'Uh...'] : ['嗯…','让我想想','这个嘛…','嗯嗯'];
+  fillerAudios = {};
+  for(const word of words){
     try{
       const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
         method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text:word,emotion:'平静',channel:cfg.ttsChannel||'minimax',lang:'zh',call_mode:true}),
+        body:JSON.stringify({text:word,emotion:'平静',channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh',call_mode:true}),
       });
       if(r.ok){
         const blob=await r.blob();
@@ -286,14 +297,18 @@ async function preloadFillers(){
   }
 }
 
+// 👇 修复 2：复用全局播放器，激活“防回声”拦截，绝对不录自己的声音
 function playFiller(){
   const words=Object.keys(fillerAudios);
   if(!words.length)return;
   const url=fillerAudios[words[Math.floor(Math.random()*words.length)]];
-  if(currentAudio){currentAudio.pause();currentAudio=null;}
-  currentAudio=new Audio(url);
-  currentAudio.play();
-  currentAudio.onended=()=>{currentAudio=null;};
+  
+  globalCallAudio.loop = false;
+  globalCallAudio.src = url;
+  globalCallAudio.onended=()=>{
+     if(!audioPlaying && audioQueue.length === 0 && callActive) keepAliveAudio();
+  };
+  globalCallAudio.play().catch(()=>{});
 }
 
 let audioQueue=[];
