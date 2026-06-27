@@ -1,15 +1,10 @@
 // ═══════════════════════════════════════
-//  通话系统 (防死锁版v2 — 竞态修复 + 语言自动识别 + 看门狗)
+//  通话系统 (防死锁修复版v3 — 仅修竞态+流超时，其他与原始版完全一致)
 // ═══════════════════════════════════════
 let callActive=false,callRecognition=null,callTimerInterval=null,callSeconds=0;
 let callSilenceTimer=null,callTranscriptLog=[],callSpeaking=false;
 let callStartedAt=null,ringTimer=null;
 let currentCallToken = null; 
-
-// 🆕 防死锁：记录 callSpeaking 何时变为 true
-let callSpeakingStartTime = 0;
-// 🆕 防死锁：看门狗定时器
-let watchdogTimer = null;
 
 let vadAudioCtx = null, vadAnalyser = null, vadStream = null, vadMic = null;
 let vadRecorder = null, vadChunks = [];
@@ -65,63 +60,6 @@ function setCallStatus(txt){
   updatePiP(txt); 
 }
 
-// ═══════════════════════════════════════
-// 🆕 核心防死锁：状态看门狗
-// 每3秒检查一次，如果发现状态卡死就强制重置
-// ═══════════════════════════════════════
-function startWatchdog() {
-  stopWatchdog();
-  watchdogTimer = setInterval(() => {
-    if (!callActive) { stopWatchdog(); return; }
-    
-    const now = Date.now();
-    
-    // 检查1: audioPlaying 卡死
-    // 如果 audioPlaying=true 但音频实际上已经停了（paused 或 ended），强制释放
-    if (audioPlaying) {
-      if (globalCallAudio.paused || globalCallAudio.ended || globalCallAudio.src === SILENT_B64 || !globalCallAudio.src) {
-        console.warn('[看门狗] audioPlaying 卡死，强制释放');
-        audioPlaying = false;
-        // 尝试继续播放队列或回到 keepAlive
-        if (audioQueue.length > 0) {
-          drainAudioQueue();
-        } else {
-          keepAliveAudio();
-        }
-      }
-    }
-    
-    // 检查2: callSpeaking 卡死（超过30秒未释放）
-    // v2: 从20秒延长到30秒，因为AI思考+TTS生成可能需要更久
-    if (callSpeaking && callSpeakingStartTime > 0 && (now - callSpeakingStartTime > 30000)) {
-      console.warn('[看门狗] callSpeaking 卡死超过30秒，强制释放');
-      callSpeaking = false;
-      callSpeakingStartTime = 0;
-      audioPlaying = false;
-      audioQueue = [];
-      animateCallWave(false);
-      if (callActive) {
-        setCallStatus('恢复中...');
-        setTimeout(() => { if(callActive) startListening(); }, 500);
-      }
-    }
-    
-    // 检查3: SpeechRecognition 丢失（PC端）
-    // 如果通话活跃、没在说话、没在播音、但 callRecognition 是 null，说明监听器丢了
-    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth <= 768;
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SR && !isMobile && callActive && !callSpeaking && !callRecognition) {
-      console.warn('[看门狗] SpeechRecognition 丢失，重新启动');
-      startListening();
-    }
-    
-  }, 3000);
-}
-
-function stopWatchdog() {
-  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
-}
-
 function startCall(){
   if(callActive)return;
   if(!cfg.base){alert('需要配置后端');return;}
@@ -171,10 +109,6 @@ function acceptCall(){
   messages.push({id:cardId,role:'system',content:'📞 通话中',ts:new Date().toISOString(),type:'call-card',callActive:true});
   saveMessages();renderMessages();
   setCallStatus('在听...');
-  
-  // 🆕 启动看门狗
-  startWatchdog();
-  
   startListening();
 }
 
@@ -198,39 +132,14 @@ function startListening(){
   const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
   
   if(SR && !isMobile) {
-    // 先清理旧的
-    if (callRecognition) {
-      try { callRecognition.abort(); } catch(e) {}
-      callRecognition = null;
-    }
-    
     callRecognition=new SR();
-    // ✅ v2.1修复：固定 zh-CN，Edge浏览器设zh-CN时自动兼容中英混读
-    // 不设lang反而导致某些浏览器识别启动失败
-    // 设en-US会导致中文被音译成英文
-    // zh-CN 是原始版本的写法，实测中英文都能识别
-    callRecognition.lang = 'zh-CN';
+    callRecognition.lang = 'zh-CN'; 
     callRecognition.continuous=false;
     callRecognition.interimResults=true;
     let finalText='';
-    
-    // 🆕 防死锁：SpeechRecognition 启动后 8 秒无结果自动重启
-    // 防止连不上语音服务器时一直卡在"监听"状态
-    let startTimeout = setTimeout(() => {
-      if (callRecognition && callActive && !callSpeaking) {
-        console.warn('[SR] 8秒无结果，自动重启');
-        try { callRecognition.abort(); } catch(e) {}
-      }
-    }, 8000);
-    
-    callRecognition.onstart=()=>{
-      if(callActive) {setCallStatus('在听...');animateCallWave(false);}
-    };
+    callRecognition.onstart=()=>{if(callActive) {setCallStatus('在听...');animateCallWave(false);}};
     callRecognition.onresult=(e)=>{
       if(!callActive || callSpeaking) return; 
-      
-      // 收到结果了，清掉超时定时器
-      clearTimeout(startTimeout);
 
       finalText='';let interim='';
       for(const r of e.results){if(r.isFinal)finalText+=r[0].transcript;else interim+=r[0].transcript;}
@@ -238,7 +147,6 @@ function startListening(){
       const currentText = finalText || interim;
       if(currentText) {
         setCallStatus('你：' + currentText);
-        animateCallWave(true);
         clearTimeout(callSilenceTimer);
         callSilenceTimer = setTimeout(() => {
           if (callRecognition) { try { callRecognition.abort(); } catch(e){} }
@@ -246,26 +154,9 @@ function startListening(){
         }, 1500);
       }
     };
-    
-    // 🆕 防死锁：onerror 中清空引用，让看门狗能检测到丢失
-    callRecognition.onerror=(e)=>{
-      clearTimeout(startTimeout);
-      console.warn('[SR] onerror:', e.error);
-      callRecognition = null; // 让看门狗能检测到
-      if(callActive && !callSpeaking) setTimeout(startListening, 1000);
-    };
-    
-    // 🆕 防死锁：onend 中清空引用
-    callRecognition.onend=()=>{
-      clearTimeout(startTimeout);
-      callRecognition = null; // 让看门狗能检测到
-      if(callActive && !callSpeaking) setTimeout(startListening, 500);
-    };
-    
-    try{ callRecognition.start(); } catch(e){ 
-      callRecognition = null;
-      setTimeout(startListening, 1000); 
-    }
+    callRecognition.onerror=(e)=>{ if(callActive&&!callSpeaking)setTimeout(startListening,1000); };
+    callRecognition.onend=()=>{ if(callActive&&!callSpeaking)setTimeout(startListening,500); };
+    try{ callRecognition.start(); } catch(e){ setTimeout(startListening, 1000); }
   } else {
     startVADListening();
   }
@@ -398,10 +289,6 @@ async function drainAudioQueue(){
 
   audioPlaying=true;
   const {base64,format}=audioQueue.shift();
-  
-  // 🆕 防死锁：单片音频 10 秒超时保护
-  let audioTimeout = null;
-  
   try{
     const bytes=atob(base64);
     const arr=new Uint8Array(bytes.length);
@@ -413,7 +300,6 @@ async function drainAudioQueue(){
     globalCallAudio.src = url;
     
     const cleanup = () => {
-      clearTimeout(audioTimeout); // 清掉超时定时器
       globalCallAudio.onended = null;
       globalCallAudio.onerror = null;
       audioPlaying=false;
@@ -423,16 +309,8 @@ async function drainAudioQueue(){
     
     globalCallAudio.onended = cleanup;
     globalCallAudio.onerror = cleanup;
-    
-    // 🆕 10秒后如果 onended 还没触发，强制 cleanup
-    audioTimeout = setTimeout(() => {
-      console.warn('[Audio] 单片播放超过10秒，强制cleanup');
-      cleanup();
-    }, 10000);
-    
     await globalCallAudio.play();
   }catch(e){
-    clearTimeout(audioTimeout);
     audioPlaying=false;
     drainAudioQueue();
   }
@@ -444,16 +322,11 @@ async function sendCallMessage(text){
   
   clearTimeout(callSilenceTimer);
   if(callRecognition){try{callRecognition.abort();}catch(e){}}
-  callRecognition = null; // 🆕 清引用
   
   callTranscriptLog.push({role:'user',content:text,ts:new Date().toISOString()});
   setCallStatus('他在想...');animateCallWave(false);
   callSpeaking=true; 
-  callSpeakingStartTime = Date.now(); // 🆕 记录开始时间，给看门狗用
   audioQueue=[];audioPlaying=false;
-
-  // 🆕 v2: SSE流完成标志——只有这个为true才说明AI的回复真正发完了
-  let sseComplete = false;
 
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/stream',{
@@ -467,10 +340,27 @@ async function sendCallMessage(text){
     let fullReply='';
     let sseBuf='';
 
+    // 👉 v3修复1：带超时的reader.read()
+    // 原始版直接 await reader.read()，如果服务器不关闭连接会永远卡住
+    // 现在每次read最多等60秒，超时就break退出
+    const readWithTimeout = (timeoutMs) => {
+      return Promise.race([
+        reader.read(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('read_timeout')), timeoutMs))
+      ]);
+    };
+
     while(true){
       if(!callActive || myToken !== currentCallToken) break; 
-      const {done,value}=await reader.read();
-      if(done) break;
+      let readResult;
+      try {
+        readResult = await readWithTimeout(60000);
+      } catch(e) {
+        try { reader.cancel(); } catch(ex) {}
+        break;
+      }
+      const {done,value} = readResult;
+      if(done)break;
       sseBuf+=decoder.decode(value,{stream:true});
       const parts=sseBuf.split('\n');
       sseBuf=parts.pop()||''; 
@@ -498,48 +388,31 @@ async function sendCallMessage(text){
       }catch(e){}
     }
 
-    // 🆕 v2: SSE流已经读完了（reader.read() 返回 done=true），标记完成
-    sseComplete = true;
-
     if(fullReply && callActive && myToken === currentCallToken) {
         callTranscriptLog.push({role:'assistant',content:fullReply,ts:new Date().toISOString()});
     }
 
-    // ═══════════════════════════════════════
-    // 🆕 v2 核心修复：等待音频播放真正结束
-    // 旧版问题：每200ms检查一次，连续3次(600ms)没音频就退出
-    //   → 如果AI的TTS音频包之间间隔>600ms，会误判为播完
-    //   → 导致callSpeaking过早释放，用户语音和AI音频交叉
-    // 新版：SSE流已经结束（sseComplete=true），所以不会再有新音频包
-    //   只需等audioQueue清空 + 当前音频播完即可
-    // ═══════════════════════════════════════
+    // 👉 v3修复2：等待音频播完
+    // SSE流已读完，不会再有新的enqueueAudio，单次确认即可退出
+    // 不再用waitCycles连续计数（原始版600ms间隔可能误判）
     await new Promise(resolve=>{
       const check=setInterval(()=>{
-        if(!callActive || myToken !== currentCallToken) { 
-          clearInterval(check); resolve(); return; 
-        }
-        // 修正audioPlaying可能卡死的情况
-        if (audioPlaying && (globalCallAudio.paused || globalCallAudio.ended)) {
-          audioPlaying = false;
-        }
-        // SSE已结束 + 没有正在播放 + 队列为空 = 真正播完了
+        if(!callActive || myToken !== currentCallToken) { clearInterval(check); resolve(); return; }
+        if (audioPlaying && (globalCallAudio.paused || globalCallAudio.ended)) audioPlaying = false;
         if(!audioPlaying && audioQueue.length === 0){
           clearInterval(check); resolve();
         }
-      },200);
-      // 安全网：最多等30秒（v2从15秒延长，因为长回复TTS可能较久）
-      setTimeout(()=>{ clearInterval(check); audioPlaying = false; audioQueue = []; resolve(); }, 30000); 
+      },300);
+      setTimeout(()=>{ clearInterval(check); audioPlaying = false; audioQueue = []; resolve(); }, 90000); 
     });
 
   }catch(e){
-    if(callActive) setCallStatus('出错了，继续说...');
+    if(callActive && myToken === currentCallToken) setCallStatus('出错了，继续说...');
   }finally{
-    // 🆕 防死锁核心修复：无条件释放 callSpeaking！
-    callSpeaking = false;
-    callSpeakingStartTime = 0;
-    animateCallWave(false);
-    if (callActive && myToken === currentCallToken) {
-      startListening();
+    if (myToken === currentCallToken) {
+       callSpeaking=false; 
+       animateCallWave(false);
+       if(callActive) startListening();
     }
   }
 }
@@ -547,15 +420,10 @@ async function sendCallMessage(text){
 async function endCall(){
   if(!callActive)return;
   callActive=false;callSpeaking=false;
-  callSpeakingStartTime = 0;
   currentCallToken = null; 
   clearTimeout(callSilenceTimer);clearInterval(callTimerInterval);
   
-  // 🆕 停止看门狗
-  stopWatchdog();
-  
   if(callRecognition){try{callRecognition.abort();}catch(e){}}
-  callRecognition = null;
   
   if (vadAnimFrame) cancelAnimationFrame(vadAnimFrame);
   if (vadRecorder) { vadRecorder.onstop = null; if(vadRecorder.state !== 'inactive') vadRecorder.stop(); } 
