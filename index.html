@@ -973,13 +973,13 @@ let callActive=false,callRecognition=null,callTimerInterval=null,callSeconds=0;
 let callSilenceTimer=null,callTranscriptLog=[],callSpeaking=false;
 let callStartedAt=null,ringTimer=null;
 
-// 免提声音检测(VAD)变量
+// VAD变量
 let vadAudioCtx = null, vadAnalyser = null, vadStream = null, vadMic = null;
 let vadRecorder = null, vadChunks = [];
 let isDetectingSpeech = false, vadSilenceTimer = null, vadAnimFrame = null;
 const VAD_THRESHOLD = 8; 
 
-// 👉 新增：用于解锁手机声音和画中画悬浮窗的全局变量
+// 解锁手机声音和画中画悬浮窗的全局变量
 let audioUnlocked = false;
 let pipCanvas=null, pipCtx=null, pipVideo=null;
 
@@ -1000,8 +1000,6 @@ function updatePiP(status) {
   pipCtx.font = '80px Arial'; pipCtx.textAlign = 'center'; pipCtx.fillText('🦀', 150, 130);
   pipCtx.font = '24px Arial'; pipCtx.fillStyle = '#d4a574'; pipCtx.fillText('我们的家', 150, 180);
   pipCtx.font = '18px Arial'; pipCtx.fillStyle = '#7d7a72'; pipCtx.fillText(status, 150, 240);
-  
-  // 👉 顺便设置锁屏界面的媒体控制通知
   if ('mediaSession' in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({ title: '🦀 我们的家', artist: status, album: '语音通话' });
   }
@@ -1010,21 +1008,21 @@ function updatePiP(status) {
 function setCallStatus(txt){
   const el = document.getElementById('callStatus');
   if(el) el.textContent = txt;
-  updatePiP(txt); // 状态更新时同步给悬浮窗
+  updatePiP(txt); 
 }
 
 function startCall(){
   if(callActive)return;
   if(!cfg.base){alert('需要配置后端');return;}
   
-  // 👉 核心修复：趁着手指点击拨打的瞬间，立刻放一段静音解锁手机音频权限！
+  // 趁着手指点击拨打的瞬间，立刻放一段静音解锁手机音频权限
   if(!audioUnlocked) {
     const silent = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjEyLjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIAD+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+AAAAAExhdmM1OC4xMgAAAAAAAAAAAAAAACQAAAAAAAAAAAEgAEiAAAAB//OEAAAAAEMASAAAAAAAQAEAAQAAAEAAoB4AAgCBAgIBAQEBAgIBAQEBAQICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA=');
     silent.play().catch(()=>{});
     audioUnlocked = true;
   }
   
-  // 👉 核心新增：开启画中画悬浮窗
+  // 开启画中画悬浮窗
   setupPiP();
   updatePiP('准备接通...');
   if(pipVideo && document.pictureInPictureEnabled) {
@@ -1068,8 +1066,6 @@ function rejectCall(){
   if(document.pictureInPictureElement) document.exitPictureInPicture().catch(()=>{});
 }
 
-function setCallStatus(txt){const el=document.getElementById('callStatus');if(el)el.textContent=txt;}
-
 function animateCallWave(active){
   document.querySelectorAll('.cwave').forEach((el,i)=>{
     el.style.animation=active?('cwave '+(0.4+i*0.08)+'s ease-in-out infinite'):'none';
@@ -1083,7 +1079,6 @@ function startListening(){
   const isMobile = window.innerWidth <= 600 || /Mobi/i.test(navigator.userAgent);
   const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
   
-  // 手机端不支持原生免提时，启动自动声音检测
   if(!SR || isMobile) {
     startVADListening();
     return;
@@ -1130,7 +1125,6 @@ function monitorVAD() {
   if (!callActive) return;
   vadAnimFrame = requestAnimationFrame(monitorVAD);
   
-  // 如果 AI 正在说话，暂停麦克风拾音，防回声
   if (callSpeaking || audioPlaying || (currentAudio && !currentAudio.paused)) {
      if (isDetectingSpeech) {
          isDetectingSpeech = false;
@@ -1161,7 +1155,6 @@ function monitorVAD() {
     clearTimeout(vadSilenceTimer);
     vadSilenceTimer = null;
   } else {
-    // 停顿 1.5 秒没说话，判定说完
     if (isDetectingSpeech && !vadSilenceTimer) {
       vadSilenceTimer = setTimeout(() => {
          isDetectingSpeech = false;
@@ -1185,9 +1178,17 @@ async function processVADAudio() {
   try {
     const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/voice/transcribe', { method: 'POST', body: fd });
     const d = await r.json();
-    if (d.text && d.text.trim()) {
-      setCallStatus('你：' + d.text.slice(0, 12) + (d.text.length > 12 ? '...' : ''));
-      sendCallMessage(d.text);
+    let txt = d.text || '';
+    
+    // 前端暴力过滤 Whisper 常见的发呆幻觉
+    const badWords = ['字幕', '观看', '订阅', '点赞', '收藏', '三连', '频道', '谢谢', 'Thank you', '欢迎', '收看'];
+    if (badWords.some(w => txt.includes(w)) && txt.length < 20) {
+        txt = ''; 
+    }
+    
+    if (txt.trim()) {
+      setCallStatus('你：' + txt.slice(0, 12) + (txt.length > 12 ? '...' : ''));
+      sendCallMessage(txt);
     } else {
       setCallStatus('在听...');
     }
@@ -1265,7 +1266,6 @@ async function sendCallMessage(text){
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/stream',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      // 👈 传 TTS 配置给后端，防止通道不匹配
       body:JSON.stringify({session_id:currentSession?.id,content:text,model:cfg.model,api_key:cfg.apiKey,api_base:cfg.apiBase, tts_channel:cfg.ttsChannel, tts_lang:cfg.ttsLang}),
     });
     if(!r.ok)throw new Error('HTTP '+r.status);
@@ -1312,17 +1312,16 @@ async function sendCallMessage(text){
       callTranscriptLog.push({role:'assistant',content:fullReply,ts:new Date().toISOString()});
     }
 
-    // 👈 核心修复：即使语音出错没声音，强制让文本展示至少3秒，防止文字闪退
     await new Promise(resolve=>{
       let waitCycles = 0;
       const check=setInterval(()=>{
         if(!audioPlaying&&!audioQueue.length&&(!currentAudio||currentAudio.paused||currentAudio.ended)){
           waitCycles++;
-          if (waitCycles > 15) { // 约等于停顿 3 秒
+          if (waitCycles > 15) {
             clearInterval(check);resolve();
           }
         } else {
-          waitCycles = 0; // 只要还在播放就一直重置
+          waitCycles = 0;
         }
       },200);
       setTimeout(()=>{clearInterval(check);resolve();},30000);
@@ -1335,7 +1334,6 @@ async function sendCallMessage(text){
     if(callActive)startListening();
   }
 }
-
 
 async function playCallTTS(text){
   return new Promise(async(resolve)=>{
@@ -1369,6 +1367,8 @@ async function endCall(){
   if (vadStream) vadStream.getTracks().forEach(t => t.stop());
   if (vadAudioCtx) vadAudioCtx.close();
   vadStream = null; vadAudioCtx = null;
+  
+  if(document.pictureInPictureElement) document.exitPictureInPicture().catch(()=>{});
   
   if(currentAudio){currentAudio.pause();currentAudio=null;}
   setCallStatus('通话结束');
@@ -1410,15 +1410,11 @@ async function endCall(){
     }).then(r=>r.json()).then(d=>{
       if(d.card_id && currentCardId){
         const card=messages.find(m=>m.id===currentCardId);
-        if(card){
-          card.id = d.card_id.toString(); 
-          saveMessages();
-        }
+        if(card){ card.id = d.card_id.toString(); saveMessages(); }
       }
     }).catch(e=>console.error('[通话记录保存失败]',e));
   }
 }
-
 
 async function renderCallRecords(){
   if(!cfg.base||!currentSession)return;
@@ -1438,15 +1434,37 @@ async function renderCallRecords(){
       const col=m.role==='user'?'var(--t)':'var(--ac)';
       return`<div><span style="color:${col}">${who}：</span>${esc(m.content)}</div>`;
     }).join('');
+    
     return`<div style="padding:10px 0;border-bottom:1px solid var(--bd)">
       <div style="display:flex;justify-content:space-between;cursor:pointer" onclick="toggleCallDetail('${detailId}')">
-        <span style="font-size:12px;color:var(--t)">📞 ${dateStr}</span>
-        <span style="font-size:11px;color:var(--td)">${dur}</span>
+        <div style="display:flex;gap:10px;align-items:center">
+          <span style="font-size:12px;color:var(--t)">📞 ${dateStr}</span>
+          <span style="font-size:11px;color:var(--td)">${dur}</span>
+        </div>
+        <button onclick="deleteCallRecord('${r.id}', '${r.started_at}', event)" style="background:none;border:none;color:#c46;cursor:pointer;font-size:11px">🗑 删除</button>
       </div>
       <div id="${detailId}" style="display:none;margin-top:6px;font-size:11px;color:var(--td);line-height:1.8">${lines}</div>
     </div>`;
   }).join('');
 }
+
+async function deleteCallRecord(id, startedAt, e) {
+  e.stopPropagation();
+  if(!confirm('确定删除这条通话记录吗？对应的聊天卡片也会被清除哦。')) return;
+  
+  try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }); } catch(e){}
+  
+  const st = new Date(startedAt).getTime();
+  const card = messages.find(m => m.type === 'call-card' && Math.abs(new Date(m.ts).getTime() - st) < 60000);
+  if(card) {
+      try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }); } catch(e){}
+      messages = messages.filter(m => m.id !== card.id);
+      saveMessages(); renderMessages();
+  }
+  
+  renderCallRecords();
+}
+
 function toggleCallDetail(id){const el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
 
 function makeDraggable(el){
@@ -1472,6 +1490,8 @@ function makeDraggable(el){
   };
   el.addEventListener('mousedown',onStart);el.addEventListener('touchstart',onStart,{passive:true});
 }
+
+
 let mediaRecorder=null;
 let audioChunks=[];
 let isRecording=false;
