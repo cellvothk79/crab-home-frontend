@@ -1215,7 +1215,8 @@ async function sendCallMessage(text){
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/stream',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({session_id:currentSession?.id,content:text,model:cfg.model,api_key:cfg.apiKey,api_base:cfg.apiBase}),
+      // 👈 传 TTS 配置给后端，防止通道不匹配
+      body:JSON.stringify({session_id:currentSession?.id,content:text,model:cfg.model,api_key:cfg.apiKey,api_base:cfg.apiBase, tts_channel:cfg.ttsChannel, tts_lang:cfg.ttsLang}),
     });
     if(!r.ok)throw new Error('HTTP '+r.status);
 
@@ -1261,10 +1262,17 @@ async function sendCallMessage(text){
       callTranscriptLog.push({role:'assistant',content:fullReply,ts:new Date().toISOString()});
     }
 
+    // 👈 核心修复：即使语音出错没声音，强制让文本展示至少3秒，防止文字闪退
     await new Promise(resolve=>{
+      let waitCycles = 0;
       const check=setInterval(()=>{
         if(!audioPlaying&&!audioQueue.length&&(!currentAudio||currentAudio.paused||currentAudio.ended)){
-          clearInterval(check);resolve();
+          waitCycles++;
+          if (waitCycles > 15) { // 约等于停顿 3 秒
+            clearInterval(check);resolve();
+          }
+        } else {
+          waitCycles = 0; // 只要还在播放就一直重置
         }
       },200);
       setTimeout(()=>{clearInterval(check);resolve();},30000);
@@ -1277,6 +1285,7 @@ async function sendCallMessage(text){
     if(callActive)startListening();
   }
 }
+
 
 async function playCallTTS(text){
   return new Promise(async(resolve)=>{
