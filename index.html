@@ -1423,20 +1423,25 @@ async function deleteCallRecord(id, startedAt, e) {
   e.stopPropagation();
   if(!confirm('确定删除这条通话记录吗？对应的聊天卡片也会被清除哦。')) return;
   
+  // 1. 先瞬间隐藏通话记录面板里的那一行
   const row = e.target.closest('div[style*="padding:10px 0"]');
   if (row) row.style.display = 'none';
   
-  try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }); } catch(e){}
-  
-  // 👉 核心修复：放宽时间差匹配到 5 分钟，确保卡片能被抓出来删掉
+  // 2. 找到对应的聊天卡片，前端立刻“秒删”并刷新（0延迟体验核心）
   const st = new Date(startedAt).getTime();
   const card = messages.find(m => m.type === 'call-card' && Math.abs(new Date(m.ts).getTime() - st) < 300000);
   if(card) {
-      try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }); } catch(e){}
       messages = messages.filter(m => m.id !== card.id);
-      saveMessages(); renderMessages();
+      saveMessages(); renderMessages(); // 立刻刷新界面
+  }
+
+  // 3. 后台偷偷去删数据库，不卡界面
+  try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }); } catch(e){}
+  if(card) {
+      try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }); } catch(e){}
   }
 }
+
 
 function toggleCallDetail(id){const el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
 
