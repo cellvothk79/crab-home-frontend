@@ -381,6 +381,31 @@ let nowTimer=null;
   // check if mobile
   if(window.innerWidth<=600){document.getElementById('sb').classList.remove('show');}
   else{document.getElementById('sb').style.position='relative';}
+  (function init(){
+  updatePresetBtn();
+  updateNow();
+  nowTimer=setInterval(updateNow,30000);
+  initSingleSession();
+  checkAnnivs();
+  setTimeout(refreshHeaderMood, 500);
+  window.addEventListener('click',()=>{document.getElementById('ctxMenu').style.display='none';});
+  if(window.innerWidth<=600){document.getElementById('sb').classList.remove('show');}
+  else{document.getElementById('sb').style.position='relative';}
+  
+  // 👇 就是加上这几行，让它听懂接电话的暗号！
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('action') === 'answer_call') {
+    // 抹掉网址里的暗号，防止刷新网页时又打一次电话
+    window.history.replaceState({}, document.title, window.location.pathname);
+    // 延迟 1 秒等网页加载完毕，然后直接接通电话！
+    setTimeout(() => {
+      startCall();
+    }, 1000);
+  }
+  // 👆 加上这段结束
+  
+})();
+
 })();
 
 // ═══════════ TIME ═══════════
