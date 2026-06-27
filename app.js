@@ -70,9 +70,9 @@ let nowTimer=null;
    // 听懂接电话的暗号
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('action') === 'answer_call') {
+    const greetText = urlParams.get('greet'); // 👈 获取暗号里提前备好的第一句话
     window.history.replaceState({}, document.title, window.location.pathname);
     
-    // 👉 核心修复：弹出一个真正的“来电界面”，逼用户点一下，以此解锁手机声音！
     const div = document.createElement('div');
     div.id = 'aiCallingOverlay';
     div.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;';
@@ -87,25 +87,43 @@ let nowTimer=null;
     `;
     document.body.appendChild(div);
 
-    // 绑定接听逻辑
     window.answerAiCall = function() {
       document.getElementById('aiCallingOverlay').remove();
-      // 有了真实的点击，解锁音频绝对成功！
       if(typeof globalCallAudio !== 'undefined' && typeof SILENT_B64 !== 'undefined') {
         globalCallAudio.src = SILENT_B64;
         globalCallAudio.loop = true;
         globalCallAudio.play().then(()=>{ audioUnlocked = true; }).catch(()=>{});
       }
-      if (typeof acceptCall === 'function') acceptCall(); // 直接跳过拨号，进入通话中
+      if (typeof acceptCall === 'function') acceptCall(); 
       
-      // 👉 让 AI 明白是他打给你的，强迫他先开口说话！
       setTimeout(() => {
-         if(typeof sendCallMessage === 'function') {
-            sendCallMessage("[系统提示：你刚刚主动拨通了她的电话，她接听了。请直接用语音对她打招呼，不要解释。]");
+         if (greetText && typeof enqueueAudio === 'function') {
+             // 👉 秒接听黑科技：跳过大模型漫长的思考，直接把准备好的话调语音合成播出来！
+             if(typeof setCallStatus === 'function') setCallStatus('他：' + greetText.slice(0, 15) + '...');
+             if(typeof callTranscriptLog !== 'undefined') callTranscriptLog.push({role:'assistant', content: greetText, ts: new Date().toISOString()});
+             
+             const em = typeof guessEmotion === 'function' ? guessEmotion(greetText) : '平静';
+             fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts', {
+                 method: 'POST', headers: {'Content-Type':'application/json'},
+                 body: JSON.stringify({text: greetText, emotion: em, channel: cfg.ttsChannel||'minimax', lang: cfg.ttsLang||'zh', call_mode: true})
+             }).then(r => r.blob()).then(blob => {
+                 const reader = new FileReader();
+                 reader.readAsDataURL(blob);
+                 reader.onloadend = () => {
+                     const b64 = reader.result.split(',')[1];
+                     enqueueAudio(b64, 'mp3'); // 👈 直接强行塞进播放队列！瞬间出声！
+                 };
+             }).catch(()=>{
+                 if(typeof sendCallMessage === 'function') sendCallMessage("[系统提示：接通成功，请打招呼]");
+             });
+         } else {
+             // 兜底老路
+             if(typeof sendCallMessage === 'function') sendCallMessage("[系统提示：你刚刚主动拨通了她的电话，她接听了。请直接用语音对她打招呼，不要解释。]");
          }
       }, 500);
     };
   }
+
 
 })();
 
