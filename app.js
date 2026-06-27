@@ -15,7 +15,6 @@ function renderStaged(){
       <span>${esc(m)}</span>
       <button class="staged-del" onclick="delStaged(${i})">×</button>
     </div>`).join('');
-  // update send button state
   const ok=!streaming&&currentSession;
   const btn=document.getElementById('sendBtn');
   btn.className='send-btn '+(ok?'on':'off');
@@ -55,40 +54,27 @@ let nowTimer=null;
   updatePresetBtn();
   updateNow();
   nowTimer=setInterval(updateNow,30000);
-  // single conversation mode - get or create the one session
   initSingleSession();
   checkAnnivs();
   setTimeout(refreshHeaderMood, 500);
-  window.addEventListener('click',()=>{document.getElementById('ctxMenu').style.display='none';});
-  // check if mobile
-  if(window.innerWidth<=600){document.getElementById('sb').classList.remove('show');}
-  else{document.getElementById('sb').style.position='relative';}
-  (function init(){
-  updatePresetBtn();
-  updateNow();
-  preloadFillers();
-  nowTimer=setInterval(updateNow,30000);
-  initSingleSession();
-  checkAnnivs();
-  setTimeout(refreshHeaderMood, 500);
+
+  // 尝试安全调用 call.js 里的垫音预加载
+  if (typeof preloadFillers === 'function') {
+      preloadFillers();
+  }
+
   window.addEventListener('click',()=>{document.getElementById('ctxMenu').style.display='none';});
   if(window.innerWidth<=600){document.getElementById('sb').classList.remove('show');}
   else{document.getElementById('sb').style.position='relative';}
   
-  // 👇 就是加上这几行，让它听懂接电话的暗号！
+  // 听懂接电话的暗号
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('action') === 'answer_call') {
-    // 抹掉网址里的暗号，防止刷新网页时又打一次电话
     window.history.replaceState({}, document.title, window.location.pathname);
-    // 延迟 1 秒等网页加载完毕，然后直接接通电话！
     setTimeout(() => {
-      startCall();
+      if (typeof startCall === 'function') startCall();
     }, 1000);
   }
-  // 👆 加上这段结束
-  
-})();
-
 })();
 
 // ═══════════ TIME ═══════════
@@ -109,58 +95,39 @@ function hideSb(){document.getElementById('sb').classList.remove('show');documen
 // ═══════════ SESSIONS ═══════════
 async function initSingleSession(){
   if(!cfg.base){
-    // no backend, use local
-    if(!currentSession){
-      currentSession={id:'local-main',name:'我们的聊天'};
-      messages=load('cc_msgs_local-main')||[];
-    }
+    if(!currentSession){currentSession={id:'local-main',name:'我们的聊天'};messages=load('cc_msgs_local-main')||[];}
     renderMessages();return;
   }
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions');
     const data=await r.json();
     if(data&&data.length){
-      // use the most recent session (or the one named "我们的聊天")
       const main=data.find(s=>s.name==='我们的聊天')||data[0];
-      currentSession=main;
-      sessions=data;
+      currentSession=main;sessions=data;
     } else {
-      // create the one session
       const r2=await fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'我们的聊天'})});
-      currentSession=await r2.json();
-      sessions=[currentSession];
+      currentSession=await r2.json();sessions=[currentSession];
     }
-    save(K.sessions,sessions);
-    loadMessages();
+    save(K.sessions,sessions);loadMessages();
   }catch(e){
-    if(sessions.length){currentSession=sessions[0];loadMessages();}
-    else renderMessages();
+    if(sessions.length){currentSession=sessions[0];loadMessages();}else renderMessages();
   }
 }
 
 function renderSessions(){
   const el=document.getElementById('sessList');
-  el.innerHTML=sessions.map(s=>`<div class="sb-item${currentSession?.id===s.id?' active':''}"
-      onclick="switchSession('${s.id}')"
-      oncontextmenu="event.preventDefault();deleteSessionConfirm('${s.id}','${esc(s.name)}')"
-      ontouchstart="startSessLongPress('${s.id}','${esc(s.name)}',event)"
-      ontouchend="clearSessLongPress()"
-      ontouchmove="clearSessLongPress()"
-      style="user-select:none">
-      ${esc(s.name)}
-    </div>`).join('');
+  if(!el) return;
+  el.innerHTML=sessions.map(s=>`<div class="sb-item${currentSession?.id===s.id?' active':''}" onclick="switchSession('${s.id}')" oncontextmenu="event.preventDefault();deleteSessionConfirm('${s.id}','${esc(s.name)}')" ontouchstart="startSessLongPress('${s.id}','${esc(s.name)}',event)" ontouchend="clearSessLongPress()" ontouchmove="clearSessLongPress()" style="user-select:none">${esc(s.name)}</div>`).join('');
 }
 async function newSession(){
   if(!cfg.base){openPanel('settings');return;}
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'新对话'})});
     const s=await r.json();
-    // s.id is a real bigint from Supabase
     sessions.unshift(s);save(K.sessions,sessions);
     currentSession=s;messages=[];
     renderSessions();renderMessages();hideSb();setTimeout(updateSendBtn,100);
   }catch(e){
-    // fallback to local if backend not available
     const s={id:Date.now().toString(),name:'新对话',createdAt:new Date().toISOString()};
     sessions.unshift(s);save(K.sessions,sessions);
     currentSession=s;messages=[];
@@ -168,63 +135,31 @@ async function newSession(){
   }
 }
 let _sessLongPressTimer=null;
-function deleteSessionConfirm(id,name){
-  if(confirm('删除对话「'+name+'」？'))deleteSession(id);
-}
-function startSessLongPress(id,name,e){
-  _sessLongPressTimer=setTimeout(()=>{
-    deleteSessionConfirm(id,name);
-  },600);
-}
-function clearSessLongPress(){
-  clearTimeout(_sessLongPressTimer);
-  _sessLongPressTimer=null;
-}
+function deleteSessionConfirm(id,name){if(confirm('删除对话「'+name+'」？'))deleteSession(id);}
+function startSessLongPress(id,name,e){_sessLongPressTimer=setTimeout(()=>{deleteSessionConfirm(id,name);},600);}
+function clearSessLongPress(){clearTimeout(_sessLongPressTimer);_sessLongPressTimer=null;}
 async function deleteSession(id){
   if(!confirm('删除这个对话？'))return;
-  if(cfg.base){
-    try{await fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions/'+id,{method:'DELETE'});}catch(e){}
-  }
-  sessions=sessions.filter(s=>s.id!=id);
-  save(K.sessions,sessions);
+  if(cfg.base){try{await fetch(cfg.base.replace(/\/+$/,'')+'/api/sessions/'+id,{method:'DELETE'});}catch(e){}}
+  sessions=sessions.filter(s=>s.id!=id);save(K.sessions,sessions);
   if(currentSession?.id==id){
-    currentSession=sessions[0]||null;
-    messages=[];
-    if(currentSession)loadMessages();
-    else renderMessages();
+    currentSession=sessions[0]||null;messages=[];
+    if(currentSession)loadMessages();else renderMessages();
   }
   renderSessions();
 }
 async function switchSession(id){
   currentSession=sessions.find(s=>s.id===id);
   renderSessions();hideSb();
-  if(!cfg.base){
-    messages=load('cc_msgs_'+id)||[];
-    renderMessages();return;
-  }
+  if(!cfg.base){messages=load('cc_msgs_'+id)||[];renderMessages();return;}
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+id);
     const data=await r.json();
-    // convert backend messages to frontend format
-    messages=data.map(m=>({
-      id:m.id.toString(),
-      role:m.role,
-      content:m.content,
-      innerThought:m.inner_thought||'',
-      ts:m.created_at,
-      type:m.image_url?'image':'text',
-      imageUrl:m.image_url||null,
-    }));
+    messages=data.map(m=>({id:m.id.toString(),role:m.role,content:m.content,innerThought:m.inner_thought||'',ts:m.created_at,type:m.image_url?'image':'text',imageUrl:m.image_url||null,}));
     renderMessages();
-  }catch(e){
-    messages=load('cc_msgs_'+id)||[];
-    renderMessages();
-  }
+  }catch(e){messages=load('cc_msgs_'+id)||[];renderMessages();}
 }
-function saveMessages(){
-  // backend is source of truth; keep local as cache
-  if(currentSession)save('cc_msgs_'+currentSession.id,messages);
-}
+function saveMessages(){if(currentSession)save('cc_msgs_'+currentSession.id,messages);}
 async function loadMessages(){
   if(!currentSession){renderMessages();return;}
   if(cfg.base){
@@ -244,23 +179,16 @@ async function loadMessages(){
       }));
       window._oldestMsgTs=messages.length?messages[0].ts:null;
       window._noMoreMsgs=data.length<200;
-    }catch(e){
-      messages=load('cc_msgs_'+currentSession.id)||[];
-    }
+    }catch(e){messages=load('cc_msgs_'+currentSession.id)||[];}
   } else {
     messages=load('cc_msgs_'+currentSession.id)||[];
   }
   renderMessages();
   checkDiary();
   if(cfg.base){
-    setTimeout(()=>{
-      messages.filter(m=>m.type==='voice'&&m.role==='assistant'&&!m.audioUrl&&!m.id?.includes('_voice')).forEach(m=>{
-        autoGenVoiceBubble(m);
-      });
-    }, 2000);
+    setTimeout(()=>{messages.filter(m=>m.type==='voice'&&m.role==='assistant'&&!m.audioUrl&&!m.id?.includes('_voice')).forEach(m=>{autoGenVoiceBubble(m);});}, 2000);
   }
 }
-
 
 async function loadMoreMessages(){
   if(!cfg.base||!currentSession)return;
@@ -272,11 +200,7 @@ async function loadMoreMessages(){
     if(!before){if(btn){btn.textContent='没有更早的消息了';btn.disabled=true;}return;}
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=200&before='+encodeURIComponent(before));
     const data=await r.json();
-    if(!data.length){
-      if(btn){btn.textContent='没有更早的消息了';btn.disabled=true;}
-      window._noMoreMsgs=true;
-      return;
-    }
+    if(!data.length){if(btn){btn.textContent='没有更早的消息了';btn.disabled=true;}window._noMoreMsgs=true;return;}
     const older=data.map(m=>({
       id:m.id.toString(),
       role:(m.role==='call_card'||m.role==='system')?'system':m.role,
@@ -284,15 +208,13 @@ async function loadMoreMessages(){
       innerThought:m.inner_thought||'',
       ts:m.created_at,
       type:(m.role==='call_card'||(m.role==='system'&&m.content.includes('📞 通话'))) ? 'call-card' : (m.is_voice?'voice':'text'),
-      imageUrl:null,
-      audioUrl:m.audio_url||null,
-      callActive:false,
+      imageUrl:null,audioUrl:m.audio_url||null,callActive:false,
     }));
     messages=[...older,...messages];
     window._oldestMsgTs=older[0].ts;
     if(data.length<200){window._noMoreMsgs=true;}
 
-    const box=document.getElementById('chatBox');
+    const box=document.getElementById('msgs');
     const firstVisibleId=messages[older.length]?.id;
     window._loadingMore=true;
     renderMessages();
@@ -306,29 +228,18 @@ async function loadMoreMessages(){
       if(window._noMoreMsgs){btn.textContent='没有更早的消息了';btn.disabled=true;}
       else btn.textContent='加载更早的消息';
     }
-  }catch(e){
-    if(btn)btn.textContent='加载更早的消息';
-  }
+  }catch(e){if(btn)btn.textContent='加载更早的消息';}
 }
 
 function checkDiary(){
   if(!cfg.base||!currentSession)return;
-  // find last user message time
   const lastUserMsg=messages.filter(m=>m.role==='user').slice(-1)[0];
   if(!lastUserMsg)return;
   fetch(cfg.base.replace(/\/+$/,'')+'/api/diary/check',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      session_id:currentSession.id,
-      last_message_time:lastUserMsg.ts,
-      api_key:cfg.apiKey,
-      api_base:cfg.apiBase,
-      model:cfg.model,
-    })
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:currentSession.id,last_message_time:lastUserMsg.ts,api_key:cfg.apiKey,api_base:cfg.apiBase,model:cfg.model,})
   }).then(r=>r.json()).then(data=>{
     if(data.wrote&&data.diary){
-      // show a subtle notification
       const notif=document.createElement('div');
       notif.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(212,165,116,.15);border:1px solid rgba(212,165,116,.3);border-radius:10px;padding:8px 14px;font-size:12px;color:var(--ac);z-index:200;animation:slideDown .3s ease';
       notif.textContent='📔 他写了一篇日记';
@@ -342,12 +253,8 @@ function checkDiary(){
 function renderMessages(){
   const el=document.getElementById('msgs');
   if(!el)return;
-  if(!messages.length){
-    el.innerHTML='<div class="empty"><div class="empty-crabs">🦀 🦀</div><div style="font-size:11px">两只小螃蟹的家<br>新建对话开始聊天</div></div>';
-    return;
-  }
+  if(!messages.length){el.innerHTML='<div class="empty"><div class="empty-crabs">🦀 🦀</div><div style="font-size:11px">两只小螃蟹的家<br>新建对话开始聊天</div></div>';return;}
   let html='';
-  // 加载更多按钮（有历史记录时显示）
   if(cfg.base&&currentSession){
     html+=`<div style="text-align:center;padding:16px 0"><button id="loadMoreBtn" onclick="loadMoreMessages()" style="background:rgba(212,165,116,.1);border:1px solid rgba(212,165,116,.3);border-radius:20px;color:var(--ac);font-size:12px;padding:8px 20px;cursor:pointer;min-width:120px">加载更早的消息</button></div>`;
   }
@@ -376,8 +283,6 @@ function renderMsg(m){
   if(m.type==='image')inner=`<img src="${m.imageUrl}" alt="图片">`;
   else inner=`<span style="white-space:pre-wrap">${esc(m.content)}</span>`;
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
-
-  // TTS 按钮只对 AI 消息显示
   const ttsBtn=(!isU&&cfg.base)?`<button onclick="playTTS(event,'${m.id}')" style="background:none;border:none;color:var(--td);font-size:12px;cursor:pointer;padding:2px 4px;opacity:.6" title="听语音">🔊</button>`:'';
 
   return`<div class="msg-row ${isU?'user':'bot'}" id="msg_${m.id}" onclick="onMsgClick('${m.id}')" oncontextmenu="onCtx(event,'${m.id}');return false">
@@ -406,7 +311,6 @@ function renderVoiceMsg(m){
   const hasAudio=!!m.audioUrl;
   const selCls=selected.has(m.id)?'outline:2px solid var(--ac);':'';
   const opCls=selMode&&!selected.has(m.id)?'opacity:.55;':'';
-  // 多选模式下不触发播放
   const voiceBar=`<div onclick="${selMode?`onMsgClick('${m.id}')`:`playVoiceMsg(event,'${m.id}')`}" style="display:flex;align-items:center;gap:6px;cursor:pointer;min-width:80px">
     <span id="vbtn_${m.id}" style="font-size:15px">${hasAudio?'▶':'🎙'}</span>
     <div style="display:flex;align-items:center;gap:2px;flex:1">
@@ -442,10 +346,8 @@ function playVoiceMsg(e,msgId){
   if(!m?.audioUrl)return;
   const btn=document.getElementById('vbtn_'+msgId);
   if(voicePlayAudio&&!voicePlayAudio.paused){
-    voicePlayAudio.pause();
-    voicePlayAudio.currentTime=0;
-    if(btn)btn.textContent='▶';
-    return;
+    voicePlayAudio.pause();voicePlayAudio.currentTime=0;
+    if(btn)btn.textContent='▶';return;
   }
   if(voicePlayAudio)voicePlayAudio.pause();
   voicePlayAudio=new Audio(m.audioUrl);
@@ -487,14 +389,13 @@ function renderMoodCard(m){
   </div>`;
 }
 
-function scrollEnd(){const el=document.getElementById('msgs');requestAnimationFrame(()=>el.scrollTop=el.scrollHeight);}
+function scrollEnd(){const el=document.getElementById('msgs');if(el)requestAnimationFrame(()=>el.scrollTop=el.scrollHeight);}
 
 // ═══════════ TODO ═══════════
 const TODO_KEYWORDS=['清单','待办','todo','计划','今天要做','任务','帮我看','check'];
 function isTodoQuery(t){return TODO_KEYWORDS.some(k=>t.toLowerCase().includes(k));}
 function toggleTodo(id){
   todos=todos.map(t=>t.id===id?{...t,done:!t.done}:t);save(K.todos,todos);
-  // re-render todo cards in place
   const el=document.getElementById('msgs');
   el.querySelectorAll('.todo-card').forEach(n=>n.outerHTML=renderTodoCard());
   renderMessages();
@@ -529,7 +430,6 @@ function handleKey(e){
 async function send(){
   const inp=document.getElementById('msgInput');
   const text=inp.value.trim();
-  // collect staged + current input
   const allTexts=[...stagedMsgs];
   if(text) allTexts.push(text);
   if(!allTexts.length||streaming||!currentSession)return;
@@ -544,19 +444,14 @@ async function send(){
   }
 
   const q=quoteMsg;clearQuote();
-  // add each staged message as separate bubble (optimistic UI)
-  const firstText=allTexts[0];
   for(let i=0;i<allTexts.length;i++){
     const userMsg={id:(Date.now()+i).toString(),role:'user',content:allTexts[i],ts:new Date().toISOString(),type:'text',quote:i===0&&q?{id:q.id,content:q.content.slice(0,55)}:null};
     messages.push(userMsg);
   }
   saveMessages();renderMessages();
-  // send combined content to backend (backend saves to supabase and queries full history)
   const combinedContent=allTexts.join('\n---msg---\n');
 
-  // check if todo query
   const showTodo=isTodoQuery(text);
-  // check if mentions anniversary/special day
   detectAnniv(text);
 
   streaming=true;
@@ -565,14 +460,11 @@ async function send(){
   try{
     let systemPrompt='';
     if(memories.length){systemPrompt+='【记忆库】以下是重要记忆，请记住：\n'+memories.map((m,i)=>`${i+1}. ${m}`).join('\n')+'\n\n';}
-    // inject time
     const d=new Date(),days=['周日','周一','周二','周三','周四','周五','周六'];
     systemPrompt+=`【当前时间】${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 ${days[d.getDay()]} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}\n\n`;
-    // inject todos if relevant
     if(showTodo&&todos.length){
       systemPrompt+=`【今日清单】${todos.map(t=>`${t.done?'✓':'○'} ${t.text}`).join('、')}\n\n`;
     }
-    // inject annivs
     if(annivs.length){
       const mo=String(d.getMonth()+1).padStart(2,'0'),da=String(d.getDate()).padStart(2,'0'),today=`${mo}-${da}`;
       const todayAnnivs=annivs.filter(a=>a.date===today);
@@ -586,7 +478,6 @@ async function send(){
     if(isOfficial){headers['x-api-key']=cfg.apiKey;headers['anthropic-version']='2023-06-01';headers['anthropic-dangerous-direct-browser-access']='true';}
     else{headers['x-api-key']=cfg.apiKey;headers['Authorization']='Bearer '+cfg.apiKey;headers['anthropic-version']='2023-06-01';}
 
-    // use backend if configured
     let reply='';
     if(cfg.base){
       const body={session_id:currentSession.id,content:combinedContent||text,model:cfg.model};
@@ -594,12 +485,10 @@ async function send(){
       if(cfg.apiBase)body.api_base=cfg.apiBase;
       if(cfg.systemPrompt)body.system_prompt_override=cfg.systemPrompt;
       if(q?.content)body.quote_content=q.content;
-      // attach image if last user message has one
       const recentImgMsg=messages.filter(m=>m.role==='user'&&m.imageBase64).slice(-1)[0];
       if(recentImgMsg&&allTexts.length<=1){
         body.image_base64=recentImgMsg.imageBase64;
         body.image_mime=recentImgMsg.imageMime||'image/jpeg';
-        // 清除已发送的图片数据，防止后续消息误带
         delete recentImgMsg.imageBase64;
         delete recentImgMsg.imageMime;
       }
@@ -618,23 +507,15 @@ async function send(){
 
     hideTyping();
     const replyData = await (async()=>{try{const rr=await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+currentSession.id+'?limit=20');const dd=await rr.json();return dd;}catch(e){return [];}})();
-    // 取非voice气泡消息里最后一条的时间戳（voice气泡是本地生成的，ts可能不准）
     const realMsgs=messages.filter(m=>!m.id?.includes('_voice'));
     const lastTs=realMsgs.length?realMsgs[realMsgs.length-1].ts:'';
     const newMsgs=(replyData||[]).filter(m=>m.created_at>lastTs&&m.role==='assistant');
     const msgsToAdd=newMsgs.length?newMsgs.map(m=>({id:m.id.toString(),role:'assistant',content:m.content,innerThought:m.inner_thought||'',ts:m.created_at,type:'text',isVoice:m.is_voice||false,audioUrl:m.audio_url||null})):(()=>{const replyMsgs=(typeof data==='object'&&data.messages)||[{content:reply,inner:'',voice:false}];return replyMsgs.map((rm,i)=>({id:(Date.now()+i+100).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner||'',ts:new Date().toISOString(),type:'text',isVoice:rm.voice||false}));})();
 
-    // 逐条显示，每条间隔1秒，像真人发微信
     if(msgsToAdd.length<=1){
       if(msgsToAdd.length){
         const msg=msgsToAdd[0];
-        if(msg.isVoice){
-          // 先插入占位语音气泡
-          msg.type='voice';msg.audioUrl=null;
-          messages.push(msg);
-        } else {
-          messages.push(msg);
-        }
+        if(msg.isVoice){msg.type='voice';msg.audioUrl=null;messages.push(msg);} else {messages.push(msg);}
       }
       saveMessages();renderMessages();
     } else {
@@ -654,19 +535,14 @@ async function send(){
       }
     }
 
-    // AI 标记了 [voice] 的消息，生成TTS更新气泡
     for(const msg of msgsToAdd){
-      if(msg.isVoice&&cfg.base){
-        autoGenVoiceBubble(msg);
-      }
+      if(msg.isVoice&&cfg.base){autoGenVoiceBubble(msg);}
     }
-    // update session name if first message
     if(messages.filter(m=>m.role==='user').length===1){
       const name=text.slice(0,14)+(text.length>14?'...':'');
       sessions=sessions.map(s=>s.id===currentSession.id?{...s,name}:s);
       save(K.sessions,sessions);renderSessions();
     }
-
   }catch(err){
     hideTyping();
     messages.push({id:Date.now().toString(),role:'assistant',content:'⚠ '+err.message,ts:new Date().toISOString(),type:'error'});
@@ -718,22 +594,17 @@ async function stopVoiceRec(e){
 
   mediaRecorder.onstop=async()=>{
     const duration=Date.now()-(window._recStartTime||0);
-    if(duration<800){
-      document.getElementById('voiceOverlay').style.display='none';
-      return;
-    }
+    if(duration<800){document.getElementById('voiceOverlay').style.display='none';return;}
     const blob=new Blob(audioChunks,{type:'audio/webm'});
     const localUrl=URL.createObjectURL(blob);
     document.getElementById('voiceOverlay').style.display='none';
 
     if(!cfg.base){alert('需要配置后端才能发语音');return;}
 
-    // 立刻插入占位气泡，让用户知道在处理
     const placeholderId=Date.now().toString();
     messages.push({id:placeholderId,role:'user',content:'语音发送中...',ts:new Date().toISOString(),type:'voice',audioUrl:localUrl});
     saveMessages();renderMessages();
 
-    // 上传录音到后端 Storage 持久化
     let audioUrl=localUrl;
     try{
       const fd2=new FormData();
@@ -751,23 +622,18 @@ async function stopVoiceRec(e){
       const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/transcribe',{method:'POST',body:fd});
       const d=await r.json();
       if(d.text){
-        // 更新占位气泡为真实内容
         const placeholder=messages.find(m=>m.id===placeholderId);
         if(placeholder){
-          placeholder.content=d.text;
-          placeholder.emotion=d.emotion||'';
-          placeholder.audioUrl=audioUrl;
+          placeholder.content=d.text;placeholder.emotion=d.emotion||'';placeholder.audioUrl=audioUrl;
         }
         saveMessages();renderMessages();
         await sendVoiceMessage(d.text, d.emotion, audioUrl);
       } else {
-        // 转写为空，移除占位
         const idx=messages.findIndex(m=>m.id===placeholderId);
         if(idx>=0)messages.splice(idx,1);
         saveMessages();renderMessages();
       }
     }catch(err){
-      console.error('语音转写失败:',err);
       const idx=messages.findIndex(m=>m.id===placeholderId);
       if(idx>=0){messages[idx].content='转写失败，点击重试';saveMessages();renderMessages();}
     }
@@ -816,7 +682,6 @@ async function sendVoiceMessage(text, emotion, audioUrl){
   }
 }
 
-// AI 自动语音气泡（开启 aiVoiceReply 时调用）
 function guessEmotion(text){
   if(/哈哈|哈哈哈|😄|😊|开心|好玩|有趣/.test(text))return '开心';
   if(/啊|！！|!!!|兴奋|太好了/.test(text))return '兴奋';
@@ -826,17 +691,16 @@ function guessEmotion(text){
   if(/不行|不对|别这样|😤/.test(text))return '生气';
   return '平静';
 }
+
 async function autoGenVoiceBubble(msg){
   if(!cfg.base||!msg?.content)return;
   try{
     const emotion=guessEmotion(msg.content);
     const bubbleId=msg.id+'_voice';
 
-    // 先检查是否已有气泡
     const existingIdx=messages.findIndex(m=>m.id===bubbleId);
     const selfIdx=messages.findIndex(m=>m.id===msg.id&&m.type==='voice');
     if(existingIdx<0&&selfIdx<0){
-      // 立刻插入占位气泡（loading状态，没有audioUrl）
       const placeholder={
         id:bubbleId,role:'assistant',content:msg.content,
         translatedContent:null,ts:msg.ts,type:'voice',
@@ -849,8 +713,7 @@ async function autoGenVoiceBubble(msg){
     }
 
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({text:msg.content.slice(0,500),emotion,channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh'}),
     });
     if(!r.ok)return;
@@ -872,7 +735,6 @@ async function autoGenVoiceBubble(msg){
       audioUrl=URL.createObjectURL(audioBlob);
     }
 
-    // 更新气泡的 audioUrl
     const existingVoiceIdx=messages.findIndex(m=>m.id===bubbleId);
     if(existingVoiceIdx>=0){
       messages[existingVoiceIdx].audioUrl=audioUrl;
@@ -887,10 +749,9 @@ async function autoGenVoiceBubble(msg){
       saveMessages();renderMessages();
     }
     saveMessages();renderMessages();
-  }catch(e){
-    console.log('自动语音气泡生成失败:',e.message);
-  }
+  }catch(e){}
 }
+
 let currentAudio=null;
 async function playTTS(e, msgId){
   e.stopPropagation();
@@ -898,7 +759,6 @@ async function playTTS(e, msgId){
   const m=messages.find(m=>m.id===msgId);
   if(!m||!cfg.base)return;
 
-  // 如果已有缓存音频直接播放
   if(m.audioUrl){
     if(currentAudio){currentAudio.pause();currentAudio=null;}
     currentAudio=new Audio(m.audioUrl);
@@ -912,20 +772,14 @@ async function playTTS(e, msgId){
   try{
     const emotion=m.emotion||guessEmotion(m.content);
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({text:m.content.slice(0,500),emotion,channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh'}),
     });
-    if(!r.ok){
-      const err=await r.json().catch(()=>({}));
-      throw new Error(err.error||'TTS 失败');
-    }
+    if(!r.ok){const err=await r.json().catch(()=>({}));throw new Error(err.error||'TTS 失败');}
     const contentType=r.headers.get('content-type')||'';
     let audioUrl;
     if(contentType.includes('application/json')){
-      const d=await r.json();
-      if(d.audioUrl){audioUrl=d.audioUrl;}
-      else throw new Error(d.error||'TTS 失败');
+      const d=await r.json();if(d.audioUrl){audioUrl=d.audioUrl;}else throw new Error(d.error||'TTS 失败');
     } else {
       const audioBlob=await r.blob();
       audioUrl=URL.createObjectURL(audioBlob);
@@ -941,9 +795,11 @@ async function playTTS(e, msgId){
     alert('语音播放失败：'+err.message+'\n（可能需要充值或检查API key）');
   }
 }
+
 let typingEl=null;
 function showTyping(){
   const msgs=document.getElementById('msgs');
+  if(!msgs) return;
   typingEl=document.createElement('div');
   typingEl.className='typing';
   typingEl.id='typingIndicator';
@@ -958,8 +814,6 @@ function sendImage(e){
   const f=e.target.files[0];if(!f)return;
   e.target.value='';
   const url=URL.createObjectURL(f);
-
-  // 压缩图片：最大 1200px，quality 0.75，控制 base64 体积
   const img=new Image();
   img.onload=function(){
     const MAX=1200;
@@ -978,7 +832,6 @@ function sendImage(e){
     document.getElementById('msgInput').focus();
   };
   img.onerror=function(){
-    // fallback：直接读原始文件
     const reader=new FileReader();
     reader.onload=function(ev){
       const b64=ev.target.result.split(',')[1];
@@ -994,6 +847,7 @@ function sendImage(e){
 // ═══════════ LINK ═══════════
 function toggleLink(){
   const row=document.getElementById('linkRow'),btn=document.getElementById('linkBtn');
+  if(!row || !btn) return;
   const show=row.style.display==='none';
   row.style.display=show?'flex':'none';
   btn.className='ic-btn '+(show?'active':'normal');
@@ -1001,13 +855,11 @@ function toggleLink(){
 }
 function sendLink(){
   const v=document.getElementById('linkInput').value.trim();if(!v)return;
-  // stage the link as a message, let user send when ready
   stageMessage('🔗 '+v);
   document.getElementById('linkInput').value='';
   toggleLink();
   document.getElementById('msgInput').focus();
 }
-
 
 // ═══════════ MOOD ═══════════
 async function generateMood(){
@@ -1016,8 +868,7 @@ async function generateMood(){
   el.textContent='💭 感受中...';
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/generate',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({session_id:currentSession.id})
     });
     const d=await r.json();
@@ -1041,33 +892,31 @@ function refreshHeaderMood(){
     .then(d=>{if(d.mood)el.textContent='💭 '+d.mood;el.style.opacity='0.8';})
     .catch(()=>{if(moods.length){const m=moods[Math.floor(Math.random()*moods.length)];el.textContent='💭 '+m;}el.style.opacity='0.8';});
 }
-function updateHeaderMoodFromReply(){
-  // 已改为按需生成，回复后不自动更新心声
-}
+function updateHeaderMoodFromReply(){}
 function toggleMood(){
   const popup=document.getElementById('moodPopup');
+  if(!popup) return;
   const show=popup.style.display==='none';
   popup.style.display=show?'block':'none';
-  document.getElementById('moodBtn').className='ic-btn '+(show?'active':'normal');
+  const btn = document.getElementById('moodBtn');
+  if(btn) btn.className='ic-btn '+(show?'active':'normal');
   if(show){
-    // show a random mood
     const m=moods[Math.floor(Math.random()*moods.length)];
     document.getElementById('moodText').textContent=m;
   }
 }
-// close mood on outside click
 document.addEventListener('click',e=>{
   const popup=document.getElementById('moodPopup');
   const btn=document.getElementById('moodBtn');
   if(popup&&btn&&!popup.contains(e.target)&&!btn.contains(e.target)){
     popup.style.display='none';
-    document.getElementById('moodBtn').className='ic-btn normal';
+    btn.className='ic-btn normal';
   }
 });
 
 // ═══════════ QUOTE ═══════════
-function clearQuote(){quoteMsg=null;document.getElementById('quoteBanner').style.display='none';}
-function cancelEdit(){editingId=null;document.getElementById('msgInput').value='';document.getElementById('editBanner').style.display='none';}
+function clearQuote(){quoteMsg=null;const b=document.getElementById('quoteBanner');if(b)b.style.display='none';}
+function cancelEdit(){editingId=null;const m=document.getElementById('msgInput');if(m)m.value='';const b=document.getElementById('editBanner');if(b)b.style.display='none';}
 
 // ═══════════ CONTEXT MENU ═══════════
 function onCtx(e,msgId){
@@ -1075,7 +924,6 @@ function onCtx(e,msgId){
   ctxMsgId=msgId;
   const m=messages.find(m=>m.id===msgId);
   document.getElementById('ctxEdit').style.display=m?.role==='user'?'block':'none';
-  // 心声只对 AI 消息显示
   document.getElementById('ctxInner').style.display=m?.role==='assistant'?'block':'none';
   const menu=document.getElementById('ctxMenu');
   menu.style.display='block';
@@ -1098,24 +946,15 @@ async function showInnerThought(m){
   const popup=document.getElementById('innerPopup');
   const text=document.getElementById('innerPopupText');
   popup.style.display='flex';
-  // 每次都现场生成，不展示 AI 回复时附带的 inner_thought
   text.innerHTML='<span style="opacity:.5">感受中...</span>';
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/generate',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        session_id:currentSession?.id,
-        content:m.content,
-        api_key:cfg.apiKey,
-        api_base:cfg.apiBase,
-        model:cfg.model,
-      })
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:currentSession?.id,content:m.content,api_key:cfg.apiKey,api_base:cfg.apiBase,model:cfg.model,})
     });
     const d=await r.json();
     if(d.mood){
       text.textContent=d.mood;
-      // 缓存到消息对象，下次不用重复生成
       m.innerThought=d.mood;
     } else {
       text.textContent='他此刻什么都没想...';
@@ -1134,15 +973,11 @@ async function deleteSelected(){
   if(!selected.size)return;
   if(!confirm(`删除选中的 ${selected.size} 条消息？`))return;
   const ids=[...selected];
-  // 后端批量删除
   if(cfg.base){
-    await Promise.all(ids.map(id=>
-      fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+id,{method:'DELETE'}).catch(()=>{})
-    ));
+    await Promise.all(ids.map(id=>fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/'+id,{method:'DELETE'}).catch(()=>{})));
   }
   messages=messages.filter(m=>!ids.includes(m.id));
-  saveMessages();
-  selMode=false;selected=new Set();
+  saveMessages();selMode=false;selected=new Set();
   updateSelBar();renderMessages();
 }
 function collectGroup(){
@@ -1166,8 +1001,6 @@ function checkAnnivs(){
   }
 }
 
-// ═══════════ DIARY (AI WRITES) ═══════════
-
 // ═══════════ PRESET ═══════════
 function updatePresetBtn(){
   const p=cfg.presets?.find(p=>p.apiBase===cfg.apiBase&&p.apiKey===cfg.apiKey)||{name:cfg.model||'设置API'};
@@ -1185,14 +1018,11 @@ function renderPanel(name){
   else if(name==='memory'){renderMemPanel();}
   else if(name==='favs')el.innerHTML=renderFavsPanel();
   else if(name==='diary'){renderDiaryPanel();}
-  else if(name==='calls'){renderCallsPanel();}
+  else if(name==='calls'){if(typeof renderCallsPanel === 'function') renderCallsPanel(); else el.innerHTML='通话模块未加载';}
   else if(name==='settings')el.innerHTML=renderSettingsPanel();
-  else if(name==='desire'){renderDesirePanel();} // 👈 加上这行
+  else if(name==='desire'){renderDesirePanel();} 
 }
 
-// ═══════════════════════════════════════
-//  渲染上帝视角：内心状态与队列面板
-// ═══════════════════════════════════════
 async function renderDesirePanel() {
   const el = document.getElementById('panelContent');
   el.innerHTML = `<div class="panel-hdr"><span class="panel-title">🧠 他的内心状态 (上帝视角)</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
@@ -1201,7 +1031,6 @@ async function renderDesirePanel() {
   if(!cfg.base || !currentSession) return;
 
   try {
-    // 同时拉取状态和队列
     const [desireRes, queueRes] = await Promise.all([
       fetch(cfg.base.replace(/\/+$/,'') + '/api/desires/' + currentSession.id),
       fetch(cfg.base.replace(/\/+$/,'') + '/api/queue/' + currentSession.id)
@@ -1209,11 +1038,9 @@ async function renderDesirePanel() {
     const d = await desireRes.json();
     const q = await queueRes.json();
 
-    // 绘制进度条组件的辅助函数
     const renderBar = (label, val, color) => {
       const pct = Math.min(100, Math.max(0, val * 100)).toFixed(1);
-      return `
-      <div style="margin-bottom:12px">
+      return `<div style="margin-bottom:12px">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--td);margin-bottom:4px">
           <span>${label}</span><span>${val.toFixed(2)}</span>
         </div>
@@ -1232,7 +1059,6 @@ async function renderDesirePanel() {
     html += renderBar('💤 疲劳控制 (Fatigue) - 满0.8罢工', d.fatigue || 0, '#555');
     html += `<div style="font-size:10px;color:var(--tf);text-align:right;margin-top:4px">最后心跳跳动: ${fmtTime(d.updated_at)}</div></div>`;
 
-    // 渲染待发送的小纸条
     html += `<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--t)">💌 偷偷藏在身后的纸条 (待发送)</div>`;
     if (q.length === 0) {
       html += `<div style="font-size:11px;color:var(--td);text-align:center;padding:10px 0">当前没有计划要发的消息。</div>`;
@@ -1242,7 +1068,6 @@ async function renderDesirePanel() {
         const timeStr = sendTime.toLocaleDateString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
         const typeIcon = msg.content_type === 'call' ? '📞' : (msg.content_type === 'voice' ? '🎙️' : '💬');
         const sourceLabel = msg.source === 'desire_engine' ? '冲动' : '约定';
-        
         return `<div style="background:var(--s2);border:1px dashed var(--bd);border-radius:8px;padding:10px;margin-bottom:8px;">
           <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--td);margin-bottom:6px">
             <span style="color:var(--ac)">计划发送时间：${timeStr}</span>
@@ -1253,21 +1078,11 @@ async function renderDesirePanel() {
       }).join('');
     }
 
-    // 加个手动刷新按钮
     html += `<button onclick="renderDesirePanel()" style="width:100%;margin-top:12px;padding:8px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;color:var(--td);font-size:12px;cursor:pointer">🔄 刷新状态</button>`;
-
     document.getElementById('desireContent').innerHTML = html;
   } catch (e) {
     document.getElementById('desireContent').innerHTML = `<div style="color:#c46;font-size:12px;text-align:center">读取失败：${e.message}</div>`;
   }
-}
-
-
-function renderCallsPanel(){
-  const el=document.getElementById('panelContent');
-  el.innerHTML=`<div class="panel-hdr"><span class="panel-title">通话记录</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-  <div id="callRecordList" style="padding:0 4px"><div style="color:var(--td);font-size:12px;padding:12px 0">加载中...</div></div>`;
-  renderCallRecords();
 }
 
 function renderPresetPanel(){
@@ -1288,7 +1103,6 @@ function renderPresetPanel(){
 function applyPreset(i){
   const p=cfg.presets[i];cfg.apiBase=p.apiBase;cfg.apiKey=p.apiKey;cfg.model=p.model;
   save(K.cfg,cfg);
-  // backup critical values separately
   localStorage.setItem('cc_apikey_backup',p.apiKey);
   localStorage.setItem('cc_apibase_backup',p.apiBase);
   localStorage.setItem('cc_model_backup',p.model);
@@ -1331,7 +1145,6 @@ async function fetchModels(presetIdx){
     window._allModels=list;
     renderModelList(list);
   }catch(e){
-    // try backend proxy
     if(cfg.base){
       try{
         const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_base:document.getElementById('pBase').value,api_key:document.getElementById('pKey').value})});
@@ -1384,8 +1197,7 @@ function renderMemPanel(){
       <button onclick="addMemManual()" style="padding:7px 10px;background:var(--ac);border:none;border-radius:8px;color:#0c0b0e;font-size:12px;cursor:pointer">添加</button>
     </div>
   </div>`;
-  loadMemStats();
-  loadMemList('');
+  loadMemStats();loadMemList('');
 }
 
 function loadMemStats(){
@@ -1437,9 +1249,7 @@ function searchMems(){
   clearTimeout(window._memSearchTimer);
   window._memSearchTimer=setTimeout(()=>loadMemList(q),300);
 }
-
 function startMemEdit(id){memEditId=id;loadMemList(document.getElementById('memSearch')?.value||'');}
-
 function saveMemEdit(id){
   const v=document.getElementById('memEditInp_'+id)?.value?.trim();
   if(!v||!cfg.base)return;
@@ -1447,7 +1257,6 @@ function saveMemEdit(id){
     .then(()=>{memEditId=null;loadMemList(document.getElementById('memSearch')?.value||'');})
     .catch(e=>alert(e.message));
 }
-
 function softDelMem(id){
   if(!confirm('移入回收站？'))return;
   if(!cfg.base)return;
@@ -1455,7 +1264,6 @@ function softDelMem(id){
     .then(()=>loadMemList(document.getElementById('memSearch')?.value||''))
     .catch(e=>alert(e.message));
 }
-
 function showMemTrash(){
   const el=document.getElementById('memList');if(!el||!cfg.base)return;
   document.getElementById('memTrashBtn').textContent='← 返回';
@@ -1473,20 +1281,15 @@ function showMemTrash(){
       </div>`).join('');
   }).catch(()=>{});
 }
-
 function restoreMem(id){
   if(!cfg.base)return;
-  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/restore',{method:'POST'})
-    .then(()=>showMemTrash()).catch(e=>alert(e.message));
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/restore',{method:'POST'}).then(()=>showMemTrash()).catch(e=>alert(e.message));
 }
-
 function permDelMem(id){
   if(!confirm('永久删除？此操作不可撤销。'))return;
   if(!cfg.base)return;
-  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/permanent',{method:'DELETE'})
-    .then(()=>showMemTrash()).catch(e=>alert(e.message));
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/permanent',{method:'DELETE'}).then(()=>showMemTrash()).catch(e=>alert(e.message));
 }
-
 async function addMemManual(){
   const v=document.getElementById('memAddInp')?.value?.trim();
   if(!v)return;
@@ -1502,7 +1305,6 @@ async function addMemManual(){
     loadMemList('');
   }
 }
-
 function addMem(){const v=document.getElementById('memInp')?.value?.trim();if(!v)return;memories.push(v);save(K.mems,memories);renderPanel('memory');}
 function delMem(i){memories.splice(i,1);save(K.mems,memories);renderPanel('memory');}
 
@@ -1527,19 +1329,16 @@ function renderFavsPanel(){
     return`<div style="background:${m.role==='user'?'#1f1c17':'var(--s1)'};border:1px solid ${m.role==='user'?'rgba(212,165,116,.12)':'var(--bd)'};border-radius:9px;padding:6px 10px;font-size:12.5px;line-height:1.5;display:inline-block;max-width:100%">${esc(m.content||'[图片]')}</div>`;
   }
 
-  // 文字类
   const textHtml=textSingles.length?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">文字</div>${textSingles.map((f,i)=>{
     const idx=favs.indexOf(f);
     return`<div class="fav-single"><div style="font-size:10px;color:var(--tf);margin-bottom:5px">${fmtTime(f.msg.savedAt||f.msg.ts)} · ${f.msg.role==='user'?'你':'他'}</div>${renderFavMsg(f.msg)}<div><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:10px;margin-top:5px" onclick="delFav(${idx})">删除</button></div></div>`;
   }).join('')}</div>`:'';
 
-  // 语音类
   const voiceHtml=voiceSingles.length?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">语音</div>${voiceSingles.map((f,i)=>{
     const idx=favs.indexOf(f);
     return`<div class="fav-single"><div style="font-size:10px;color:var(--tf);margin-bottom:5px">${fmtTime(f.msg.savedAt||f.msg.ts)} · ${f.msg.role==='user'?'你':'他'}</div>${renderFavMsg(f.msg)}<div><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:10px;margin-top:5px" onclick="delFav(${idx})">删除</button></div></div>`;
   }).join('')}</div>`:'';
 
-  // 组合类
   const groupHtml=groups.length?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">组合</div>${groups.map((f,i)=>{
     const idx=favs.indexOf(f);
     const inner=f.collapsed?'':`<div style="border-top:1px solid var(--bd);padding-top:8px;margin-top:8px">${f.msgs.map(m=>`<div style="margin-bottom:7px"><div style="font-size:10px;color:var(--tf);margin-bottom:3px">${m.role==='user'?'你':'他'} · ${fmtTime(m.ts)}</div>${renderFavMsg(m,true)}</div>`).join('')}</div>`;
@@ -1555,8 +1354,7 @@ let favAudio=null;
 function playFavVoice(id,url){
   if(favAudio){favAudio.pause();favAudio=null;}
   if(!url)return;
-  favAudio=new Audio(url);
-  favAudio.play();
+  favAudio=new Audio(url);favAudio.play();
 }
 function delFav(i){favs.splice(i,1);save(K.favs,favs);renderPanel('favs');}
 function toggleFavGroup(i){favs[i].collapsed=!favs[i].collapsed;save(K.favs,favs);renderPanel('favs');}
@@ -1570,7 +1368,6 @@ function renderDiaryPanel(){
     <div id="diaryList"><div style="text-align:center;color:var(--tf);font-size:12px;padding:20px">加载中...</div></div>`;
   if(!cfg.base)return;
   loadDiaryList();
-  return '';
 }
 
 function loadDiaryList(){
@@ -1600,27 +1397,14 @@ async function forceDiary(){
   if(btn)btn.disabled=true;
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/diary/force',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        session_id:currentSession.id,
-        api_key:cfg.apiKey,
-        api_base:cfg.apiBase,
-        model:cfg.model,
-      })
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:currentSession.id,api_key:cfg.apiKey,api_base:cfg.apiBase,model:cfg.model,})
     });
     const data=await r.json();
-    if(data.wrote){
-      if(status)status.textContent='✅ 写好了！';
-      loadDiaryList();
-    } else {
-      if(status)status.textContent='💭 他觉得今天没什么特别值得记录的（reason: '+(data.reason||data.error||'无')+')';
-    }
-  }catch(e){
-    if(status)status.textContent='❌ 出错了: '+e.message;
-  }finally{
-    if(btn)btn.disabled=false;
-  }
+    if(data.wrote){if(status)status.textContent='✅ 写好了！';loadDiaryList();}
+    else {if(status)status.textContent='💭 他觉得今天没什么特别值得记录的（reason: '+(data.reason||data.error||'无')+')';}
+  }catch(e){if(status)status.textContent='❌ 出错了: '+e.message;}
+  finally{if(btn)btn.disabled=false;}
 }
 
 function renderSettingsPanel(){
@@ -1656,12 +1440,9 @@ function saveCfgSettings(){
   cfg.base=document.getElementById('cfgBase').value.trim();
   cfg.systemPrompt=document.getElementById('cfgPrompt').value.trim();
   save(K.cfg,cfg);
-  // also save base to a separate key as backup
   if(cfg.base)localStorage.setItem('cc_base_backup',cfg.base);
-  // sync system prompt to backend
   if(cfg.base){
-    fetch(cfg.base.replace(/\/+$/,'')+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_prompt:cfg.systemPrompt})})
-      .catch(e=>console.error('同步设置失败:',e));
+    fetch(cfg.base.replace(/\/+$/,'')+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_prompt:cfg.systemPrompt})}).catch(e=>console.error('同步设置失败:',e));
   }
   closePanel();
 }
@@ -1670,4 +1451,3 @@ function delAnniv(i){annivs.splice(i,1);save(K.annivs,annivs);renderPanel('setti
 
 // ═══════════ UTILS ═══════════
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-
