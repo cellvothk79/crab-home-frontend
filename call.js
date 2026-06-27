@@ -205,10 +205,11 @@ function startListening(){
     }
     
     callRecognition=new SR();
-    // ✅ v2修复：不设置 lang，让浏览器自动识别语言
-    // 浏览器原生SpeechRecognition不设lang时会自动检测中英文
-    // 之前错误地绑定到cfg.ttsLang导致用户说中文被强制用英文识别
-    // callRecognition.lang 不设置 = 使用浏览器默认（自动检测）
+    // ✅ v2.1修复：固定 zh-CN，Edge浏览器设zh-CN时自动兼容中英混读
+    // 不设lang反而导致某些浏览器识别启动失败
+    // 设en-US会导致中文被音译成英文
+    // zh-CN 是原始版本的写法，实测中英文都能识别
+    callRecognition.lang = 'zh-CN';
     callRecognition.continuous=false;
     callRecognition.interimResults=true;
     let finalText='';
