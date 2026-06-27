@@ -503,3 +503,11 @@ function makeDraggable(el){
   };
   el.addEventListener('mousedown',onStart);el.addEventListener('touchstart',onStart,{passive:true});
 }
+// 👉 补充丢失的通话面板外壳渲染函数
+function renderCallsPanel() {
+  const el = document.getElementById('panelContent');
+  if(!el) return;
+  el.innerHTML = `<div class="panel-hdr"><span class="panel-title">通话记录</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+  <div id="callRecordList" style="padding:0 4px"><div style="color:var(--td);font-size:12px;padding:12px 0">加载中...</div></div>`;
+  renderCallRecords();
+}
