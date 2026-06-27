@@ -345,15 +345,18 @@ async function sendCallMessage(text){
     await new Promise(resolve=>{
       let waitCycles = 0;
       const check=setInterval(()=>{
-        if(!audioPlaying&&!audioQueue.length&&(!globalCallAudio||globalCallAudio.paused||globalCallAudio.ended)){
+        // 👇 核心修复：不再被“无限循环的静音”迷惑，只要真实的语音播完了，立刻轮到你说话！
+        if(!audioPlaying && audioQueue.length === 0){
           waitCycles++;
-          if (waitCycles > 15) { clearInterval(check);resolve(); }
+          if (waitCycles > 2) { clearInterval(check); resolve(); }
         } else {
           waitCycles = 0;
         }
-      },200);
-      setTimeout(()=>{clearInterval(check);resolve();},30000);
+      }, 200);
+      // 这里的 30000 就是你体感到的“快 30 秒”，现在它只是个保险丝了
+      setTimeout(()=>{ clearInterval(check); resolve(); }, 30000); 
     });
+
 
   }catch(e){
     setCallStatus('出错了，继续说...');
