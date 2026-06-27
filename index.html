@@ -384,6 +384,7 @@ let nowTimer=null;
   (function init(){
   updatePresetBtn();
   updateNow();
+  preloadFillers();
   nowTimer=setInterval(updateNow,30000);
   initSingleSession();
   checkAnnivs();
@@ -1210,7 +1211,7 @@ function monitorVAD() {
          if(vadRecorder.state !== 'inactive') vadRecorder.stop();
          setCallStatus('识别中...');
          animateCallWave(false);
-      }, 2500);
+      }, 1000);
     }
   }
 }
@@ -1288,6 +1289,12 @@ async function sendCallMessage(text){
   callTranscriptLog.push({role:'user',content:text,ts:new Date().toISOString()});
   setCallStatus('他在想...');animateCallWave(false);callSpeaking=true;
   audioQueue=[];audioPlaying=false;
+
+  // 👉 只有 30% 的概率会发垫音，显得更像真人偶尔思考
+  if (Math.random() < 0.3) {
+    playFiller();
+  }
+
 
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/stream',{
