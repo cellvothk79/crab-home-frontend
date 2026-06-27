@@ -1,4 +1,3 @@
-<script>
 // ═══════════ STAGED MESSAGES ═══════════
 let stagedMsgs = [];
 function stageMessage(text){
@@ -1671,4 +1670,4 @@ function delAnniv(i){annivs.splice(i,1);save(K.annivs,annivs);renderPanel('setti
 
 // ═══════════ UTILS ═══════════
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-</script>
+
