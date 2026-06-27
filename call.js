@@ -1,14 +1,16 @@
 // ═══════════════════════════════════════
-//  通话系统 (完美防卡死、防闹鬼版)
+//  通话系统 (电脑端抗噪原生版 + 手机端VAD双引擎 + 侧边栏完整版)
 // ═══════════════════════════════════════
 let callActive=false,callRecognition=null,callTimerInterval=null,callSeconds=0;
 let callSilenceTimer=null,callTranscriptLog=[],callSpeaking=false;
 let callStartedAt=null,ringTimer=null;
+let currentCallToken = null; 
 
 let vadAudioCtx = null, vadAnalyser = null, vadStream = null, vadMic = null;
 let vadRecorder = null, vadChunks = [];
 let isDetectingSpeech = false, vadSilenceTimer = null, vadAnimFrame = null;
-const VAD_THRESHOLD = 3; 
+let speechStartTime = 0; 
+const VAD_THRESHOLD = 4; 
 
 const SILENT_B64 = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjEyLjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIAD+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+AAAAAExhdmM1OC4xMgAAAAAAAAAAAAAAACQAAAAAAAAAAAEgAEiAAAAB//OEAAAAAEMASAAAAAAAQAEAAQAAAEAAoB4AAgCBAgIBAQEBAgIBAQEBAQICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA=';
 let globalCallAudio = new Audio();
@@ -29,15 +31,17 @@ function keepAliveAudio() {
 let pipCanvas=null, pipCtx=null, pipVideo=null;
 
 function setupPiP() {
-  if(!document.pictureInPictureEnabled || pipVideo) return;
-  pipCanvas = document.createElement('canvas');
-  pipCanvas.width = 300; pipCanvas.height = 300;
-  pipCtx = pipCanvas.getContext('2d');
-  pipVideo = document.createElement('video');
-  pipVideo.muted = true; pipVideo.playsInline = true; pipVideo.autoplay = true;
-  pipVideo.style.display = 'none';
-  document.body.appendChild(pipVideo);
-  pipVideo.srcObject = pipCanvas.captureStream(10);
+  if(!document.pictureInPictureEnabled) return;
+  if(!pipVideo) {
+    pipCanvas = document.createElement('canvas');
+    pipCanvas.width = 300; pipCanvas.height = 300;
+    pipCtx = pipCanvas.getContext('2d');
+    pipVideo = document.createElement('video');
+    pipVideo.muted = true; pipVideo.playsInline = true; pipVideo.autoplay = true;
+    pipVideo.style.display = 'none'; 
+    document.body.appendChild(pipVideo);
+    pipVideo.srcObject = pipCanvas.captureStream(10);
+  }
   pipVideo.play().catch(()=>{});
 }
 
@@ -70,7 +74,7 @@ function startCall(){
   
   setupPiP();
   updatePiP('准备接通...');
-  if(pipVideo && document.pictureInPictureEnabled) {
+  if(pipVideo && document.pictureInPictureEnabled && !document.pictureInPictureElement) {
       pipVideo.requestPictureInPicture().catch(()=>{});
   }
 
@@ -88,10 +92,12 @@ function acceptCall(){
   document.getElementById('incomingCall').style.display='none';
   callActive=true;callTranscriptLog=[];callSeconds=0;
   callStartedAt=new Date().toISOString();
+  currentCallToken = Date.now(); 
+  
   document.getElementById('callWindow').style.display='block';
   document.getElementById('callBtn').style.color='var(--ac)';
   
-  keepAliveAudio();
+  keepAliveAudio(); 
   
   callTimerInterval=setInterval(()=>{
     callSeconds++;
@@ -124,10 +130,32 @@ function animateCallWave(active){
 
 function startListening(){
   if(!callActive||callSpeaking)return;
-  // 👉 彻底抛弃自带的拉垮识别，不管电脑还是手机，全都走我们强大的 VAD 黑科技！
-  startVADListening();
+  const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth <= 768;
+  const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
+  
+  // 电脑走原生，手机走 VAD
+  if(SR && !isMobile) {
+    callRecognition=new SR();
+    callRecognition.lang='zh-CN';
+    callRecognition.continuous=false;
+    callRecognition.interimResults=true;
+    let finalText='';
+    callRecognition.onstart=()=>{if(callActive) {setCallStatus('在听...');animateCallWave(false);}};
+    callRecognition.onresult=(e)=>{
+      if(!callActive)return; 
+      finalText='';let interim='';
+      for(const r of e.results){if(r.isFinal)finalText+=r[0].transcript;else interim+=r[0].transcript;}
+      if(interim||finalText)setCallStatus('你：'+(finalText||interim));
+      clearTimeout(callSilenceTimer);
+      if(finalText)callSilenceTimer=setTimeout(()=>sendCallMessage(finalText),1500);
+    };
+    callRecognition.onerror=(e)=>{ if(callActive&&!callSpeaking)setTimeout(startListening,500); };
+    callRecognition.onend=()=>{ if(callActive&&!callSpeaking)setTimeout(startListening,300); };
+    try{callRecognition.start();}catch(e){}
+  } else {
+    startVADListening();
+  }
 }
-
 
 async function startVADListening() {
   if(vadStream) return;
@@ -160,7 +188,7 @@ function monitorVAD() {
          vadRecorder.onstop = null;
          if(vadRecorder.state !== 'inactive') vadRecorder.stop();
          vadRecorder.onstop = orig;
-         setCallStatus('他在想...');
+         if(callActive) setCallStatus('他在想...');
      }
      return;
   }
@@ -174,7 +202,7 @@ function monitorVAD() {
   if (avg > VAD_THRESHOLD) {
     if (!isDetectingSpeech) {
       isDetectingSpeech = true;
-      speechStartTime = Date.now(); // 记录说话开始时间
+      speechStartTime = Date.now(); 
       vadChunks = [];
       if(vadRecorder.state === 'inactive') vadRecorder.start();
       setCallStatus('听你说话...');
@@ -183,14 +211,12 @@ function monitorVAD() {
     clearTimeout(vadSilenceTimer);
     vadSilenceTimer = null;
 
-    // 👇 修复：放宽到 60000 毫秒（60秒），让你能一口气说一段长长的话！
     if (isDetectingSpeech && Date.now() - speechStartTime > 60000) {
       isDetectingSpeech = false;
       if(vadRecorder.state !== 'inactive') vadRecorder.stop();
       setCallStatus('识别中...');
       animateCallWave(false);
     }
-
   } else {
     if (isDetectingSpeech && !vadSilenceTimer) {
       vadSilenceTimer = setTimeout(() => {
@@ -199,17 +225,19 @@ function monitorVAD() {
          if(vadRecorder.state !== 'inactive') vadRecorder.stop();
          setCallStatus('识别中...');
          animateCallWave(false);
-      }, 1200); // 停顿1.2秒判定你说完了
+      }, 1200); 
     }
   }
 }
 
-
 async function processVADAudio() {
-  if (vadChunks.length === 0) { setCallStatus('在听...'); return; }
+  let myToken = currentCallToken; 
+  if (vadChunks.length === 0) { if(callActive) setCallStatus('在听...'); return; }
   const blob = new Blob(vadChunks, { type: 'audio/webm' });
   vadChunks = [];
-  // 👉 降低文件体积要求，防止漏掉合法的短句
+  
+  if (!callActive || myToken !== currentCallToken) return; 
+  
   if (blob.size < 2000) { setCallStatus('在听...'); return; }
   
   const fd = new FormData();
@@ -217,8 +245,10 @@ async function processVADAudio() {
   try {
     const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/voice/transcribe', { method: 'POST', body: fd });
     const d = await r.json();
-    let txt = d.text || '';
     
+    if (!callActive || myToken !== currentCallToken) return;
+
+    let txt = d.text || '';
     const badWords = ['字幕', '观看', '订阅', '点赞', '收藏', '三连', '频道', '谢谢', 'Thank', '欢迎', '收看', '拜拜', '由AI生成', '再见', '不客气', 'AI'];
     if (badWords.some(w => txt.includes(w)) && txt.length < 25) {
         txt = ''; 
@@ -228,13 +258,13 @@ async function processVADAudio() {
       setCallStatus('你：' + txt.slice(0, 12) + (txt.length > 12 ? '...' : ''));
       sendCallMessage(txt);
     } else {
-      // 👉 提示没听清，而不是毫无反应
       setCallStatus('没听清...');
-      setTimeout(() => { if(!callSpeaking) setCallStatus('在听...') }, 1000);
+      setTimeout(() => { if(callActive && !callSpeaking && myToken === currentCallToken) setCallStatus('在听...') }, 1000);
     }
   } catch (err) {
+    if (myToken !== currentCallToken || !callActive) return;
     setCallStatus('识别失败');
-    setTimeout(() => { if(!callSpeaking) setCallStatus('在听...') }, 1000);
+    setTimeout(() => { if(callActive && !callSpeaking) setCallStatus('在听...') }, 1000);
   }
 }
 
@@ -256,7 +286,6 @@ async function preloadFillers(){
   }
 }
 
-let fillerTimer=null;
 function playFiller(){
   const words=Object.keys(fillerAudios);
   if(!words.length)return;
@@ -270,16 +299,16 @@ function playFiller(){
 let audioQueue=[];
 let audioPlaying=false;
 function enqueueAudio(base64,format='mp3'){
-  if (!callActive) return; // 👉 挂断后绝对不排队！防闹鬼
+  if (!callActive) return; 
   audioQueue.push({base64,format});
   if(!audioPlaying)drainAudioQueue();
 }
 async function drainAudioQueue(){
   if(audioPlaying||!audioQueue.length) {
-      if(!audioPlaying && callActive) keepAliveAudio();
+      if(!audioPlaying && callActive) keepAliveAudio(); 
       return;
   }
-  if (!callActive) return; // 👉 挂断后绝对不播！
+  if (!callActive) return; 
 
   audioPlaying=true;
   const {base64,format}=audioQueue.shift();
@@ -293,7 +322,6 @@ async function drainAudioQueue(){
     globalCallAudio.loop = false;
     globalCallAudio.src = url;
     
-    // 👉 同时绑定 onended 和 onerror，防止任何意外卡死
     const cleanup = () => {
       globalCallAudio.onended = null;
       globalCallAudio.onerror = null;
@@ -312,9 +340,9 @@ async function drainAudioQueue(){
 }
 
 async function sendCallMessage(text){
+  let myToken = currentCallToken;
   if(!callActive||!text.trim())return;
   clearTimeout(callSilenceTimer);
-  if(callRecognition){try{callRecognition.abort();}catch(e){}}
   callTranscriptLog.push({role:'user',content:text,ts:new Date().toISOString()});
   setCallStatus('他在想...');animateCallWave(false);callSpeaking=true;
   audioQueue=[];audioPlaying=false;
@@ -334,7 +362,7 @@ async function sendCallMessage(text){
     let sseBuf='';
 
     while(true){
-      if(!callActive) break; // 👉 如果已经挂断，立刻掐断水管！防闹鬼
+      if(!callActive || myToken !== currentCallToken) break; 
       const {done,value}=await reader.read();
       if(done)break;
       sseBuf+=decoder.decode(value,{stream:true});
@@ -356,7 +384,7 @@ async function sendCallMessage(text){
       }
     }
     
-    if(callActive && sseBuf.startsWith('data: ')){
+    if(callActive && myToken === currentCallToken && sseBuf.startsWith('data: ')){
       try{
         const evt=JSON.parse(sseBuf.slice(6));
         if(evt.type==='audio')enqueueAudio(evt.audio,evt.format||'mp3');
@@ -364,13 +392,14 @@ async function sendCallMessage(text){
       }catch(e){}
     }
 
-    if(fullReply) callTranscriptLog.push({role:'assistant',content:fullReply,ts:new Date().toISOString()});
+    if(fullReply && callActive && myToken === currentCallToken) {
+        callTranscriptLog.push({role:'assistant',content:fullReply,ts:new Date().toISOString()});
+    }
 
-    // 👉 终极防卡死保险：如果遇到各种奇葩断流，20秒后强行踢开播放器把麦克风给你！
     await new Promise(resolve=>{
       let waitCycles = 0;
       const check=setInterval(()=>{
-        // 发现被静音骗了，或者播放器卡死，强行解脱
+        if(!callActive || myToken !== currentCallToken) { clearInterval(check); resolve(); return; }
         if (audioPlaying && (globalCallAudio.paused || globalCallAudio.ended)) audioPlaying = false;
         
         if(!audioPlaying && audioQueue.length === 0){
@@ -380,36 +409,35 @@ async function sendCallMessage(text){
           waitCycles = 0;
         }
       },200);
-      
-      setTimeout(()=>{ 
-         clearInterval(check); 
-         audioPlaying = false; audioQueue = []; 
-         resolve(); 
-      }, 20000); 
+      setTimeout(()=>{ clearInterval(check); audioPlaying = false; audioQueue = []; resolve(); }, 15000); 
     });
 
   }catch(e){
-    if(callActive) setCallStatus('出错了，继续说...');
+    if(callActive && myToken === currentCallToken) setCallStatus('出错了，继续说...');
   }finally{
-    callSpeaking=false; animateCallWave(false);
-    if(callActive) startListening();
+    if (myToken === currentCallToken) {
+       callSpeaking=false; animateCallWave(false);
+       if(callActive) startListening();
+    }
   }
 }
 
 async function endCall(){
   if(!callActive)return;
   callActive=false;callSpeaking=false;
+  currentCallToken = null; 
   clearTimeout(callSilenceTimer);clearInterval(callTimerInterval);
+  
   if(callRecognition){try{callRecognition.abort();}catch(e){}}
   
   if (vadAnimFrame) cancelAnimationFrame(vadAnimFrame);
+  if (vadRecorder) { vadRecorder.onstop = null; if(vadRecorder.state !== 'inactive') vadRecorder.stop(); } 
   if (vadStream) vadStream.getTracks().forEach(t => t.stop());
-  if (vadAudioCtx) vadAudioCtx.close();
+  if (vadAudioCtx && vadAudioCtx.state !== 'closed') vadAudioCtx.close();
   vadStream = null; vadAudioCtx = null;
   
   if(document.pictureInPictureElement) document.exitPictureInPicture().catch(()=>{});
   
-  // 👉 挂断时瞬间清空所有积压的语音
   audioQueue = []; 
   audioPlaying = false;
   globalCallAudio.pause();
@@ -461,6 +489,15 @@ async function endCall(){
   }
 }
 
+// 👉 找回丢失的侧边栏面板渲染函数！绝对没漏！
+function renderCallsPanel() {
+  const el = document.getElementById('panelContent');
+  if(!el) return;
+  el.innerHTML = `<div class="panel-hdr"><span class="panel-title">通话记录</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+  <div id="callRecordList" style="padding:0 4px"><div style="color:var(--td);font-size:12px;padding:12px 0">加载中...</div></div>`;
+  renderCallRecords();
+}
+
 async function renderCallRecords(){
   if(!cfg.base||!currentSession)return;
   const res=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records?session_id='+currentSession.id).catch(()=>null);
@@ -497,26 +534,19 @@ async function deleteCallRecord(id, startedAt, e) {
   e.stopPropagation();
   if(!confirm('确定删除这条通话记录吗？对应的聊天卡片也会被清除哦。')) return;
   
-  // 1. 先瞬间隐藏侧边栏的通话记录行
   const row = e.target.closest('div[style*="padding:10px 0"]');
   if (row) row.style.display = 'none';
   
-  // 2. 👉 修复：不等网络请求，立刻在前端把聊天卡片删掉并刷新！绝对0延迟！
+  try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }); } catch(e){}
+  
   const st = new Date(startedAt).getTime();
   const card = messages.find(m => m.type === 'call-card' && Math.abs(new Date(m.ts).getTime() - st) < 300000);
   if(card) {
+      try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }); } catch(e){}
       messages = messages.filter(m => m.id !== card.id);
-      saveMessages(); 
-      renderMessages(); // 立刻刷新界面，卡片瞬间消失
-  }
-
-  // 3. 最后在后台偷偷把数据库里的东西删掉（不用 await 傻等）
-  fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }).catch(()=>{});
-  if(card) {
-      fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }).catch(()=>{});
+      saveMessages(); renderMessages();
   }
 }
-
 
 function toggleCallDetail(id){const el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
 
@@ -542,12 +572,4 @@ function makeDraggable(el){
     document.removeEventListener('mouseup',onEnd);document.removeEventListener('touchend',onEnd);
   };
   el.addEventListener('mousedown',onStart);el.addEventListener('touchstart',onStart,{passive:true});
-}
-// 👉 找回丢失的面板渲染函数
-function renderCallsPanel() {
-  const el = document.getElementById('panelContent');
-  if(!el) return;
-  el.innerHTML = `<div class="panel-hdr"><span class="panel-title">通话记录</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-  <div id="callRecordList" style="padding:0 4px"><div style="color:var(--td);font-size:12px;padding:12px 0">加载中...</div></div>`;
-  renderCallRecords();
 }
