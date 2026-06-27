@@ -67,14 +67,46 @@ let nowTimer=null;
   if(window.innerWidth<=600){document.getElementById('sb').classList.remove('show');}
   else{document.getElementById('sb').style.position='relative';}
   
-  // 听懂接电话的暗号
+   // 听懂接电话的暗号
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('action') === 'answer_call') {
     window.history.replaceState({}, document.title, window.location.pathname);
-    setTimeout(() => {
-      if (typeof startCall === 'function') startCall();
-    }, 1000);
+    
+    // 👉 核心修复：弹出一个真正的“来电界面”，逼用户点一下，以此解锁手机声音！
+    const div = document.createElement('div');
+    div.id = 'aiCallingOverlay';
+    div.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.85);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;';
+    div.innerHTML = `
+      <div style="font-size:60px;margin-bottom:20px;animation:pulse 1s infinite">🦀</div>
+      <div style="font-size:18px;margin-bottom:10px;color:var(--ac)">他打来了电话...</div>
+      <div style="font-size:13px;color:var(--td);margin-bottom:50px">主动语音通话</div>
+      <div style="display:flex;gap:50px">
+         <button onclick="answerAiCall()" style="width:64px;height:64px;border-radius:50%;background:#4caf50;border:none;color:#fff;font-size:28px;cursor:pointer;box-shadow:0 0 15px rgba(76,175,80,0.5)">📞</button>
+         <button onclick="document.getElementById('aiCallingOverlay').remove();" style="width:64px;height:64px;border-radius:50%;background:#f44336;border:none;color:#fff;font-size:28px;cursor:pointer;box-shadow:0 0 15px rgba(244,67,54,0.5)">📵</button>
+      </div>
+    `;
+    document.body.appendChild(div);
+
+    // 绑定接听逻辑
+    window.answerAiCall = function() {
+      document.getElementById('aiCallingOverlay').remove();
+      // 有了真实的点击，解锁音频绝对成功！
+      if(typeof globalCallAudio !== 'undefined' && typeof SILENT_B64 !== 'undefined') {
+        globalCallAudio.src = SILENT_B64;
+        globalCallAudio.loop = true;
+        globalCallAudio.play().then(()=>{ audioUnlocked = true; }).catch(()=>{});
+      }
+      if (typeof acceptCall === 'function') acceptCall(); // 直接跳过拨号，进入通话中
+      
+      // 👉 让 AI 明白是他打给你的，强迫他先开口说话！
+      setTimeout(() => {
+         if(typeof sendCallMessage === 'function') {
+            sendCallMessage("[系统提示：你刚刚主动拨通了她的电话，她接听了。请直接用语音对她打招呼，不要解释。]");
+         }
+      }, 500);
+    };
   }
+
 })();
 
 // ═══════════ TIME ═══════════
