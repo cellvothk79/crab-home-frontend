@@ -174,6 +174,7 @@ function monitorVAD() {
   if (avg > VAD_THRESHOLD) {
     if (!isDetectingSpeech) {
       isDetectingSpeech = true;
+      speechStartTime = Date.now(); // 记录说话开始时间
       vadChunks = [];
       if(vadRecorder.state === 'inactive') vadRecorder.start();
       setCallStatus('听你说话...');
@@ -181,19 +182,28 @@ function monitorVAD() {
     }
     clearTimeout(vadSilenceTimer);
     vadSilenceTimer = null;
+
+    // 👇 修复：放宽到 60000 毫秒（60秒），让你能一口气说一段长长的话！
+    if (isDetectingSpeech && Date.now() - speechStartTime > 60000) {
+      isDetectingSpeech = false;
+      if(vadRecorder.state !== 'inactive') vadRecorder.stop();
+      setCallStatus('识别中...');
+      animateCallWave(false);
+    }
+
   } else {
     if (isDetectingSpeech && !vadSilenceTimer) {
-      // 👉 恢复到 1.6 秒，给你充足的思考停顿时间，防止话说一半被切断
       vadSilenceTimer = setTimeout(() => {
          isDetectingSpeech = false;
          vadSilenceTimer = null;
          if(vadRecorder.state !== 'inactive') vadRecorder.stop();
          setCallStatus('识别中...');
          animateCallWave(false);
-      }, 1600);
+      }, 1200); // 停顿1.2秒判定你说完了
     }
   }
 }
+
 
 async function processVADAudio() {
   if (vadChunks.length === 0) { setCallStatus('在听...'); return; }
@@ -487,19 +497,26 @@ async function deleteCallRecord(id, startedAt, e) {
   e.stopPropagation();
   if(!confirm('确定删除这条通话记录吗？对应的聊天卡片也会被清除哦。')) return;
   
+  // 1. 先瞬间隐藏侧边栏的通话记录行
   const row = e.target.closest('div[style*="padding:10px 0"]');
   if (row) row.style.display = 'none';
   
-  try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }); } catch(e){}
-  
+  // 2. 👉 修复：不等网络请求，立刻在前端把聊天卡片删掉并刷新！绝对0延迟！
   const st = new Date(startedAt).getTime();
   const card = messages.find(m => m.type === 'call-card' && Math.abs(new Date(m.ts).getTime() - st) < 300000);
   if(card) {
-      try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }); } catch(e){}
       messages = messages.filter(m => m.id !== card.id);
-      saveMessages(); renderMessages();
+      saveMessages(); 
+      renderMessages(); // 立刻刷新界面，卡片瞬间消失
+  }
+
+  // 3. 最后在后台偷偷把数据库里的东西删掉（不用 await 傻等）
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }).catch(()=>{});
+  if(card) {
+      fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }).catch(()=>{});
   }
 }
+
 
 function toggleCallDetail(id){const el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
 
