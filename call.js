@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════
-//  通话系统 (电脑端抗噪原生版 + 手机端VAD双引擎 + 侧边栏完整版)
+//  通话系统 (Edge防卡死 + 中英双语 + 移除垫话版)
 // ═══════════════════════════════════════
 let callActive=false,callRecognition=null,callTimerInterval=null,callSeconds=0;
 let callSilenceTimer=null,callTranscriptLog=[],callSpeaking=false;
@@ -31,17 +31,15 @@ function keepAliveAudio() {
 let pipCanvas=null, pipCtx=null, pipVideo=null;
 
 function setupPiP() {
-  if(!document.pictureInPictureEnabled) return;
-  if(!pipVideo) {
-    pipCanvas = document.createElement('canvas');
-    pipCanvas.width = 300; pipCanvas.height = 300;
-    pipCtx = pipCanvas.getContext('2d');
-    pipVideo = document.createElement('video');
-    pipVideo.muted = true; pipVideo.playsInline = true; pipVideo.autoplay = true;
-    pipVideo.style.display = 'none'; 
-    document.body.appendChild(pipVideo);
-    pipVideo.srcObject = pipCanvas.captureStream(10);
-  }
+  if(!document.pictureInPictureEnabled || pipVideo) return;
+  pipCanvas = document.createElement('canvas');
+  pipCanvas.width = 300; pipCanvas.height = 300;
+  pipCtx = pipCanvas.getContext('2d');
+  pipVideo = document.createElement('video');
+  pipVideo.muted = true; pipVideo.playsInline = true; pipVideo.autoplay = true;
+  pipVideo.style.display = 'none'; 
+  document.body.appendChild(pipVideo);
+  pipVideo.srcObject = pipCanvas.captureStream(10);
   pipVideo.play().catch(()=>{});
 }
 
@@ -135,20 +133,29 @@ function startListening(){
   
   if(SR && !isMobile) {
     callRecognition=new SR();
-    callRecognition.lang = cfg.ttsLang === 'en' ? 'en-US' : 'zh-CN'; 
+    // 👉 恢复为 zh-CN，Edge 浏览器会自动兼容中英混读，不再强行全当英文
+    callRecognition.lang = 'zh-CN'; 
     callRecognition.continuous=false;
     callRecognition.interimResults=true;
     let finalText='';
     callRecognition.onstart=()=>{if(callActive) {setCallStatus('在听...');animateCallWave(false);}};
     callRecognition.onresult=(e)=>{
-      // 👇 核心修复1：如果 AI 已经在思考或说话了，直接捂住耳朵，绝对不准录进任何声音（包括垫音）！
       if(!callActive || callSpeaking) return; 
 
       finalText='';let interim='';
       for(const r of e.results){if(r.isFinal)finalText+=r[0].transcript;else interim+=r[0].transcript;}
-      if(interim||finalText)setCallStatus('你：'+(finalText||interim));
-      clearTimeout(callSilenceTimer);
-      if(finalText)callSilenceTimer=setTimeout(()=>sendCallMessage(finalText),1500);
+      
+      const currentText = finalText || interim;
+      if(currentText) {
+        setCallStatus('你：' + currentText);
+        clearTimeout(callSilenceTimer);
+        // 👉 核心修复：Edge 卡死终结者！
+        // 只要你 1.5 秒没说话，不管是不是“最终结果”，强行掐断麦克风发送过去！
+        callSilenceTimer = setTimeout(() => {
+          if (callRecognition) { try { callRecognition.abort(); } catch(e){} }
+          sendCallMessage(currentText);
+        }, 1500);
+      }
     };
     callRecognition.onerror=(e)=>{ if(callActive&&!callSpeaking)setTimeout(startListening,1000); };
     callRecognition.onend=()=>{ if(callActive&&!callSpeaking)setTimeout(startListening,500); };
@@ -157,8 +164,6 @@ function startListening(){
     startVADListening();
   }
 }
-
-
 
 async function startVADListening() {
   if(vadStream) return;
@@ -271,42 +276,6 @@ async function processVADAudio() {
   }
 }
 
-const FILLER_WORDS=['嗯…','嗯嗯'];
-// 👇 修复 1：根据中英文模式，动态加载对应的垫音
-let fillerAudios={};
-async function preloadFillers(){
-  if(!cfg.base)return;
-  // 英文就用 Um, 中文就用 嗯
-  const words = cfg.ttsLang === 'en' ? ['Um...', 'Let me think...', 'Well...', 'Uh...'] : ['嗯…','让我想想','这个嘛…','嗯嗯'];
-  fillerAudios = {};
-  for(const word of words){
-    try{
-      const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text:word,emotion:'平静',channel:cfg.ttsChannel||'minimax',lang:cfg.ttsLang||'zh',call_mode:true}),
-      });
-      if(r.ok){
-        const blob=await r.blob();
-        fillerAudios[word]=URL.createObjectURL(blob);
-      }
-    }catch(e){}
-  }
-}
-
-// 👇 修复 2：复用全局播放器，激活“防回声”拦截，绝对不录自己的声音
-function playFiller(){
-  const words=Object.keys(fillerAudios);
-  if(!words.length)return;
-  const url=fillerAudios[words[Math.floor(Math.random()*words.length)]];
-  
-  globalCallAudio.loop = false;
-  globalCallAudio.src = url;
-  globalCallAudio.onended=()=>{
-     if(!audioPlaying && audioQueue.length === 0 && callActive) keepAliveAudio();
-  };
-  globalCallAudio.play().catch(()=>{});
-}
-
 let audioQueue=[];
 let audioPlaying=false;
 function enqueueAudio(base64,format='mp3'){
@@ -352,7 +321,6 @@ async function drainAudioQueue(){
 
 async function sendCallMessage(text){
   let myToken = currentCallToken;
-  // 👇 核心修复2：防并发锁！如果已经在处理你的话了，严禁任何人（包括回声）来插队清空队列！
   if(!callActive||!text.trim()||callSpeaking)return;
   
   clearTimeout(callSilenceTimer);
@@ -360,10 +328,8 @@ async function sendCallMessage(text){
   
   callTranscriptLog.push({role:'user',content:text,ts:new Date().toISOString()});
   setCallStatus('他在想...');animateCallWave(false);
-  callSpeaking=true; // 👈 锁上大门
+  callSpeaking=true; 
   audioQueue=[];audioPlaying=false;
-
-  if (Math.random() < 0.3) playFiller();
 
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/stream',{
@@ -432,13 +398,12 @@ async function sendCallMessage(text){
     if(callActive && myToken === currentCallToken) setCallStatus('出错了，继续说...');
   }finally{
     if (myToken === currentCallToken) {
-       callSpeaking=false; // 👈 办完事了，重新开门
+       callSpeaking=false; 
        animateCallWave(false);
        if(callActive) startListening();
     }
   }
 }
-
 
 async function endCall(){
   if(!callActive)return;
@@ -507,7 +472,6 @@ async function endCall(){
   }
 }
 
-// 👉 找回丢失的侧边栏面板渲染函数！绝对没漏！
 function renderCallsPanel() {
   const el = document.getElementById('panelContent');
   if(!el) return;
@@ -555,14 +519,16 @@ async function deleteCallRecord(id, startedAt, e) {
   const row = e.target.closest('div[style*="padding:10px 0"]');
   if (row) row.style.display = 'none';
   
-  try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }); } catch(e){}
-  
   const st = new Date(startedAt).getTime();
   const card = messages.find(m => m.type === 'call-card' && Math.abs(new Date(m.ts).getTime() - st) < 300000);
   if(card) {
-      try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }); } catch(e){}
       messages = messages.filter(m => m.id !== card.id);
-      saveMessages(); renderMessages();
+      saveMessages(); renderMessages(); 
+  }
+
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }).catch(()=>{});
+  if(card) {
+      fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }).catch(()=>{});
   }
 }
 
