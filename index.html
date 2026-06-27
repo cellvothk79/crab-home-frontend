@@ -525,16 +525,15 @@ async function loadMessages(){
       const data=await r.json();
       messages=data.map(m=>({
         id:m.id.toString(),
-        role:m.role==='call_card'?'system':m.role,
+        role:(m.role==='call_card'||m.role==='system')?'system':m.role,
         content:m.content,
         innerThought:m.inner_thought||'',
         ts:m.created_at,
-        type:m.role==='call_card'?'call-card':(m.is_voice?'voice':'text'),
+        type:(m.role==='call_card'||(m.role==='system'&&m.content.includes('📞 通话'))) ? 'call-card' : (m.is_voice?'voice':'text'),
         imageUrl:null,
         audioUrl:m.audio_url||null,
         callActive:false,
       }));
-      // 记录最早消息的时间戳，用于加载更多
       window._oldestMsgTs=messages.length?messages[0].ts:null;
       window._noMoreMsgs=data.length<200;
     }catch(e){
@@ -545,7 +544,6 @@ async function loadMessages(){
   }
   renderMessages();
   checkDiary();
-  // 刷新后，is_voice 但没有 audio_url 的 AI 消息，重新生成语音（只处理没有audioUrl的）
   if(cfg.base){
     setTimeout(()=>{
       messages.filter(m=>m.type==='voice'&&m.role==='assistant'&&!m.audioUrl&&!m.id?.includes('_voice')).forEach(m=>{
@@ -554,6 +552,7 @@ async function loadMessages(){
     }, 2000);
   }
 }
+
 
 async function loadMoreMessages(){
   if(!cfg.base||!currentSession)return;
@@ -572,11 +571,11 @@ async function loadMoreMessages(){
     }
     const older=data.map(m=>({
       id:m.id.toString(),
-      role:m.role==='call_card'?'system':m.role,
+      role:(m.role==='call_card'||m.role==='system')?'system':m.role,
       content:m.content,
       innerThought:m.inner_thought||'',
       ts:m.created_at,
-      type:m.role==='call_card'?'call-card':(m.is_voice?'voice':'text'),
+      type:(m.role==='call_card'||(m.role==='system'&&m.content.includes('📞 通话'))) ? 'call-card' : (m.is_voice?'voice':'text'),
       imageUrl:null,
       audioUrl:m.audio_url||null,
       callActive:false,
@@ -585,16 +584,14 @@ async function loadMoreMessages(){
     window._oldestMsgTs=older[0].ts;
     if(data.length<200){window._noMoreMsgs=true;}
 
-    // 记录当前第一条可见消息的 id，加载后滚回它
     const box=document.getElementById('chatBox');
     const firstVisibleId=messages[older.length]?.id;
     window._loadingMore=true;
     renderMessages();
-    // 滚回到加载前第一条消息的位置
     if(firstVisibleId){
       const el=document.getElementById('msg_'+firstVisibleId)||document.querySelector(`[data-id="${firstVisibleId}"]`);
       if(el)el.scrollIntoView({block:'start'});
-      else if(box)box.scrollTop=box.scrollHeight-box.scrollHeight*0.7; // fallback
+      else if(box)box.scrollTop=box.scrollHeight-box.scrollHeight*0.7; 
     }
 
     if(btn){
@@ -605,6 +602,7 @@ async function loadMoreMessages(){
     if(btn)btn.textContent='加载更早的消息';
   }
 }
+
 function checkDiary(){
   if(!cfg.base||!currentSession)return;
   // find last user message time
@@ -975,10 +973,15 @@ let callActive=false,callRecognition=null,callTimerInterval=null,callSeconds=0;
 let callSilenceTimer=null,callTranscriptLog=[],callSpeaking=false;
 let callStartedAt=null,ringTimer=null;
 
+// 免提声音检测(VAD)变量
+let vadAudioCtx = null, vadAnalyser = null, vadStream = null, vadMic = null;
+let vadRecorder = null, vadChunks = [];
+let isDetectingSpeech = false, vadSilenceTimer = null, vadAnimFrame = null;
+const VAD_THRESHOLD = 8; 
+
 function startCall(){
   if(callActive)return;
   if(!cfg.base){alert('需要配置后端');return;}
-  if(!('SpeechRecognition' in window||'webkitSpeechRecognition' in window)){alert('请使用 Chrome 或安卓 Chrome');return;}
   document.getElementById('incomingCall').style.display='block';
   document.getElementById('ringStatus').textContent='响铃中...';
   const delay=2000+Math.random()*2000;
@@ -1027,7 +1030,15 @@ function animateCallWave(active){
 
 function startListening(){
   if(!callActive||callSpeaking)return;
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  const isMobile = window.innerWidth <= 600 || /Mobi/i.test(navigator.userAgent);
+  const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
+  
+  // 手机端不支持原生免提时，启动自动声音检测
+  if(!SR || isMobile) {
+    startVADListening();
+    return;
+  }
+  
   callRecognition=new SR();
   callRecognition.lang='zh-CN';
   callRecognition.continuous=false;
@@ -1041,18 +1052,101 @@ function startListening(){
     clearTimeout(callSilenceTimer);
     if(finalText)callSilenceTimer=setTimeout(()=>sendCallMessage(finalText),1500);
   };
-  callRecognition.onerror=(e)=>{
-    console.log('[通话] 识别错误:',e.error);
-    if(callActive&&!callSpeaking)setTimeout(startListening,500);
-  };
-  callRecognition.onend=()=>{
-    console.log('[通话] 识别结束, active:',callActive,'speaking:',callSpeaking);
-    if(callActive&&!callSpeaking)setTimeout(startListening,300);
-  };
+  callRecognition.onerror=(e)=>{ if(callActive&&!callSpeaking)setTimeout(startListening,500); };
+  callRecognition.onend=()=>{ if(callActive&&!callSpeaking)setTimeout(startListening,300); };
   try{callRecognition.start();}catch(e){}
 }
 
-// 预生成语气词音频（掩盖思考延迟）
+async function startVADListening() {
+  if(vadStream) return;
+  try {
+    vadStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    vadAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    vadAnalyser = vadAudioCtx.createAnalyser();
+    vadAnalyser.fftSize = 512;
+    vadMic = vadAudioCtx.createMediaStreamSource(vadStream);
+    vadMic.connect(vadAnalyser);
+    vadRecorder = new MediaRecorder(vadStream, { mimeType: 'audio/webm' });
+    vadRecorder.ondataavailable = e => { if (e.data.size > 0) vadChunks.push(e.data); };
+    vadRecorder.onstop = processVADAudio;
+    setCallStatus('在听...');
+    monitorVAD();
+  } catch (e) {
+    setCallStatus('麦克风权限被拒');
+  }
+}
+
+function monitorVAD() {
+  if (!callActive) return;
+  vadAnimFrame = requestAnimationFrame(monitorVAD);
+  
+  // 如果 AI 正在说话，暂停麦克风拾音，防回声
+  if (callSpeaking || audioPlaying || (currentAudio && !currentAudio.paused)) {
+     if (isDetectingSpeech) {
+         isDetectingSpeech = false;
+         clearTimeout(vadSilenceTimer); vadSilenceTimer = null;
+         const orig = vadRecorder.onstop;
+         vadRecorder.onstop = null;
+         if(vadRecorder.state !== 'inactive') vadRecorder.stop();
+         vadRecorder.onstop = orig;
+         setCallStatus('他在想...');
+     }
+     return;
+  }
+
+  const dataArray = new Uint8Array(vadAnalyser.frequencyBinCount);
+  vadAnalyser.getByteFrequencyData(dataArray);
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+  let avg = sum / dataArray.length;
+
+  if (avg > VAD_THRESHOLD) {
+    if (!isDetectingSpeech) {
+      isDetectingSpeech = true;
+      vadChunks = [];
+      if(vadRecorder.state === 'inactive') vadRecorder.start();
+      setCallStatus('听你说话...');
+      animateCallWave(true);
+    }
+    clearTimeout(vadSilenceTimer);
+    vadSilenceTimer = null;
+  } else {
+    // 停顿 1.5 秒没说话，判定说完
+    if (isDetectingSpeech && !vadSilenceTimer) {
+      vadSilenceTimer = setTimeout(() => {
+         isDetectingSpeech = false;
+         vadSilenceTimer = null;
+         if(vadRecorder.state !== 'inactive') vadRecorder.stop();
+         setCallStatus('识别中...');
+         animateCallWave(false);
+      }, 1500);
+    }
+  }
+}
+
+async function processVADAudio() {
+  if (vadChunks.length === 0) { setCallStatus('在听...'); return; }
+  const blob = new Blob(vadChunks, { type: 'audio/webm' });
+  vadChunks = [];
+  if (blob.size < 4000) { setCallStatus('在听...'); return; }
+  
+  const fd = new FormData();
+  fd.append('audio', blob, 'voice.webm');
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/voice/transcribe', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (d.text && d.text.trim()) {
+      setCallStatus('你：' + d.text.slice(0, 12) + (d.text.length > 12 ? '...' : ''));
+      sendCallMessage(d.text);
+    } else {
+      setCallStatus('在听...');
+    }
+  } catch (err) {
+    setCallStatus('识别失败');
+    setTimeout(() => { if(!callSpeaking) setCallStatus('在听...') }, 1000);
+  }
+}
+
 const FILLER_WORDS=['嗯…','让我想想','这个嘛…','嗯嗯'];
 let fillerAudios={};
 async function preloadFillers(){
@@ -1069,7 +1163,6 @@ async function preloadFillers(){
       }
     }catch(e){}
   }
-  console.log('[通话] 语气词预加载完成');
 }
 
 let fillerTimer=null;
@@ -1083,7 +1176,6 @@ function playFiller(){
   currentAudio.onended=()=>{currentAudio=null;};
 }
 
-// 音频播放队列（保证顺序播放）
 let audioQueue=[];
 let audioPlaying=false;
 function enqueueAudio(base64,format='mp3'){
@@ -1121,7 +1213,6 @@ async function sendCallMessage(text){
   audioQueue=[];audioPlaying=false;
 
   try{
-    // 用 streaming 接口
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/stream',{
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({session_id:currentSession?.id,content:text,model:cfg.model,api_key:cfg.apiKey,api_base:cfg.apiBase}),
@@ -1133,15 +1224,14 @@ async function sendCallMessage(text){
     const reader=r.body.getReader();
     const decoder=new TextDecoder();
     let fullReply='';
-    let sseBuf=''; // SSE 缓冲，处理跨 chunk 的数据
+    let sseBuf='';
 
     while(true){
       const {done,value}=await reader.read();
       if(done)break;
       sseBuf+=decoder.decode(value,{stream:true});
-      // 按完整行处理
       const parts=sseBuf.split('\n');
-      sseBuf=parts.pop()||''; // 最后一段可能不完整，留到下次
+      sseBuf=parts.pop()||''; 
       for(const line of parts){
         if(!line.startsWith('data: '))continue;
         try{
@@ -1159,7 +1249,6 @@ async function sendCallMessage(text){
         }catch(e){}
       }
     }
-    // 处理缓冲区剩余
     if(sseBuf.startsWith('data: ')){
       try{
         const evt=JSON.parse(sseBuf.slice(6));
@@ -1172,7 +1261,6 @@ async function sendCallMessage(text){
       callTranscriptLog.push({role:'assistant',content:fullReply,ts:new Date().toISOString()});
     }
 
-    // 等音频队列播完再恢复听
     await new Promise(resolve=>{
       const check=setInterval(()=>{
         if(!audioPlaying&&!audioQueue.length&&(!currentAudio||currentAudio.paused||currentAudio.ended)){
@@ -1183,7 +1271,6 @@ async function sendCallMessage(text){
     });
 
   }catch(e){
-    console.error('通话streaming失败:',e.message);
     setCallStatus('出错了，继续说...');
   }finally{
     callSpeaking=false;animateCallWave(false);
@@ -1218,30 +1305,36 @@ async function endCall(){
   callActive=false;callSpeaking=false;
   clearTimeout(callSilenceTimer);clearInterval(callTimerInterval);
   if(callRecognition){try{callRecognition.abort();}catch(e){}}
+  
+  if (vadAnimFrame) cancelAnimationFrame(vadAnimFrame);
+  if (vadStream) vadStream.getTracks().forEach(t => t.stop());
+  if (vadAudioCtx) vadAudioCtx.close();
+  vadStream = null; vadAudioCtx = null;
+  
   if(currentAudio){currentAudio.pause();currentAudio=null;}
   setCallStatus('通话结束');
   await new Promise(r=>setTimeout(r,800));
   document.getElementById('callWindow').style.display='none';
   document.getElementById('callBtn').style.color='';
   animateCallWave(false);
-  if(window._callCardId){
-    const card=messages.find(m=>m.id===window._callCardId);
+  
+  const currentCardId = window._callCardId;
+  window._callCardId = null;
+  
+  if(currentCardId){
+    const card=messages.find(m=>m.id===currentCardId);
     if(card){
       const m=String(Math.floor(callSeconds/60)).padStart(2,'0');
       const s=String(callSeconds%60).padStart(2,'0');
       card.content='📞 通话 '+m+':'+s;card.callActive=false;
     }
-    window._callCardId=null;
   }
   saveMessages();renderMessages();
 
-  // 保存通话记录（先复制再清空，避免异步问题）
   const transcriptToSave=[...callTranscriptLog];
   const durationToSave=callSeconds;
   const startedAtToSave=callStartedAt;
   callTranscriptLog=[];callStartedAt=null;
-
-  console.log('[通话结束] transcript条数:', transcriptToSave.length, 'duration:', durationToSave);
 
   if(currentSession){
     const m=String(Math.floor(durationToSave/60)).padStart(2,'0');
@@ -1256,17 +1349,17 @@ async function endCall(){
         card_content:'📞 通话 '+m+':'+s,
       }),
     }).then(r=>r.json()).then(d=>{
-      console.log('[通话记录已保存]',d);
-      if(d.card_id&&window._callCardId){
-        const card=messages.find(m=>m.id===window._callCardId);
-        if(card)card.db_id=d.card_id;
-        saveMessages();
+      if(d.card_id && currentCardId){
+        const card=messages.find(m=>m.id===currentCardId);
+        if(card){
+          card.id = d.card_id.toString(); 
+          saveMessages();
+        }
       }
     }).catch(e=>console.error('[通话记录保存失败]',e));
-  } else {
-    console.log('[通话结束] 无session，跳过保存');
   }
 }
+
 
 async function renderCallRecords(){
   if(!cfg.base||!currentSession)return;
