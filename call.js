@@ -135,14 +135,15 @@ function startListening(){
   
   if(SR && !isMobile) {
     callRecognition=new SR();
-    // 👇 顺手加个优化：如果你设了英文，这里也能听懂英文了！
     callRecognition.lang = cfg.ttsLang === 'en' ? 'en-US' : 'zh-CN'; 
     callRecognition.continuous=false;
     callRecognition.interimResults=true;
     let finalText='';
     callRecognition.onstart=()=>{if(callActive) {setCallStatus('在听...');animateCallWave(false);}};
     callRecognition.onresult=(e)=>{
-      if(!callActive)return; 
+      // 👇 核心修复1：如果 AI 已经在思考或说话了，直接捂住耳朵，绝对不准录进任何声音（包括垫音）！
+      if(!callActive || callSpeaking) return; 
+
       finalText='';let interim='';
       for(const r of e.results){if(r.isFinal)finalText+=r[0].transcript;else interim+=r[0].transcript;}
       if(interim||finalText)setCallStatus('你：'+(finalText||interim));
@@ -151,17 +152,12 @@ function startListening(){
     };
     callRecognition.onerror=(e)=>{ if(callActive&&!callSpeaking)setTimeout(startListening,1000); };
     callRecognition.onend=()=>{ if(callActive&&!callSpeaking)setTimeout(startListening,500); };
-    
-    // 👇 核心修复 3：加入抢救机制！如果麦克风崩溃，1秒后强制重启，绝对不死机！
-    try{ 
-        callRecognition.start(); 
-    } catch(e) { 
-        setTimeout(startListening, 1000); 
-    }
+    try{ callRecognition.start(); } catch(e){ setTimeout(startListening, 1000); }
   } else {
     startVADListening();
   }
 }
+
 
 
 async function startVADListening() {
@@ -356,10 +352,15 @@ async function drainAudioQueue(){
 
 async function sendCallMessage(text){
   let myToken = currentCallToken;
-  if(!callActive||!text.trim())return;
+  // 👇 核心修复2：防并发锁！如果已经在处理你的话了，严禁任何人（包括回声）来插队清空队列！
+  if(!callActive||!text.trim()||callSpeaking)return;
+  
   clearTimeout(callSilenceTimer);
+  if(callRecognition){try{callRecognition.abort();}catch(e){}}
+  
   callTranscriptLog.push({role:'user',content:text,ts:new Date().toISOString()});
-  setCallStatus('他在想...');animateCallWave(false);callSpeaking=true;
+  setCallStatus('他在想...');animateCallWave(false);
+  callSpeaking=true; // 👈 锁上大门
   audioQueue=[];audioPlaying=false;
 
   if (Math.random() < 0.3) playFiller();
@@ -431,11 +432,13 @@ async function sendCallMessage(text){
     if(callActive && myToken === currentCallToken) setCallStatus('出错了，继续说...');
   }finally{
     if (myToken === currentCallToken) {
-       callSpeaking=false; animateCallWave(false);
+       callSpeaking=false; // 👈 办完事了，重新开门
+       animateCallWave(false);
        if(callActive) startListening();
     }
   }
 }
+
 
 async function endCall(){
   if(!callActive)return;
