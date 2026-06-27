@@ -979,9 +979,13 @@ let vadRecorder = null, vadChunks = [];
 let isDetectingSpeech = false, vadSilenceTimer = null, vadAnimFrame = null;
 const VAD_THRESHOLD = 8; 
 
-// 解锁手机声音和画中画悬浮窗的全局变量
+// 👉 核心修复：创建一个全局复用的播放器，彻底绕过手机拦截
+let globalCallAudio = new Audio();
+globalCallAudio.autoplay = true;
 let audioUnlocked = false;
+
 let pipCanvas=null, pipCtx=null, pipVideo=null;
+
 
 function setupPiP() {
   if(!document.pictureInPictureEnabled || pipVideo) return;
@@ -1015,14 +1019,13 @@ function startCall(){
   if(callActive)return;
   if(!cfg.base){alert('需要配置后端');return;}
   
-  // 趁着手指点击拨打的瞬间，立刻放一段静音解锁手机音频权限
+  // 👉 核心修复：手指点击拨打的瞬间，给全局播放器喂一段静音，拿到手机的“免死金牌”
   if(!audioUnlocked) {
-    const silent = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjEyLjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIAD+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+AAAAAExhdmM1OC4xMgAAAAAAAAAAAAAAACQAAAAAAAAAAAEgAEiAAAAB//OEAAAAAEMASAAAAAAAQAEAAQAAAEAAoB4AAgCBAgIBAQEBAgIBAQEBAQICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA=');
-    silent.play().catch(()=>{});
+    globalCallAudio.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjEyLjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIAD+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+AAAAAExhdmM1OC4xMgAAAAAAAAAAAAAAACQAAAAAAAAAAAEgAEiAAAAB//OEAAAAAEMASAAAAAAAQAEAAQAAAEAAoB4AAgCBAgIBAQEBAgIBAQEBAQICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA=';
+    globalCallAudio.play().catch(()=>{});
     audioUnlocked = true;
   }
   
-  // 开启画中画悬浮窗
   setupPiP();
   updatePiP('准备接通...');
   if(pipVideo && document.pictureInPictureEnabled) {
@@ -1037,6 +1040,7 @@ function startCall(){
     setTimeout(acceptCall,800);
   },delay);
 }
+
 
 function acceptCall(){
   clearTimeout(ringTimer);
@@ -1243,10 +1247,15 @@ async function drainAudioQueue(){
     for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);
     const blob=new Blob([arr],{type:'audio/'+format});
     const url=URL.createObjectURL(blob);
-    if(currentAudio){currentAudio.pause();currentAudio=null;}
-    currentAudio=new Audio(url);
+    
+    // 👉 核心修复：坚决不 new Audio，复用已经拿到免死金牌的 globalCallAudio
+    currentAudio = globalCallAudio; 
+    currentAudio.src = url;
+    
     currentAudio.onended=()=>{
-      currentAudio=null;audioPlaying=false;
+      currentAudio.onended = null;
+      currentAudio.onerror = null;
+      audioPlaying=false;
       URL.revokeObjectURL(url);
       drainAudioQueue();
     };
@@ -1254,6 +1263,7 @@ async function drainAudioQueue(){
     await currentAudio.play();
   }catch(e){audioPlaying=false;drainAudioQueue();}
 }
+
 
 async function sendCallMessage(text){
   if(!callActive||!text.trim())return;
@@ -1452,6 +1462,10 @@ async function deleteCallRecord(id, startedAt, e) {
   e.stopPropagation();
   if(!confirm('确定删除这条通话记录吗？对应的聊天卡片也会被清除哦。')) return;
   
+  // 👉 前端视觉秒删：不等后端返回，立刻隐藏这一行，体验极致丝滑
+  const row = e.target.closest('div[style*="padding:10px 0"]');
+  if (row) row.style.display = 'none';
+  
   try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }); } catch(e){}
   
   const st = new Date(startedAt).getTime();
@@ -1461,9 +1475,8 @@ async function deleteCallRecord(id, startedAt, e) {
       messages = messages.filter(m => m.id !== card.id);
       saveMessages(); renderMessages();
   }
-  
-  renderCallRecords();
 }
+
 
 function toggleCallDetail(id){const el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
 
