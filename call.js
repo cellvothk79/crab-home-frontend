@@ -1,17 +1,15 @@
 // ═══════════════════════════════════════
-//  通话系统
+//  通话系统 (完美防卡死、防闹鬼版)
 // ═══════════════════════════════════════
 let callActive=false,callRecognition=null,callTimerInterval=null,callSeconds=0;
 let callSilenceTimer=null,callTranscriptLog=[],callSpeaking=false;
 let callStartedAt=null,ringTimer=null;
 
-// VAD变量 (调高了灵敏度，延长了等待时间)
 let vadAudioCtx = null, vadAnalyser = null, vadStream = null, vadMic = null;
 let vadRecorder = null, vadChunks = [];
 let isDetectingSpeech = false, vadSilenceTimer = null, vadAnimFrame = null;
 const VAD_THRESHOLD = 3; 
 
-// 👉 核心黑科技：无限循环的静音播放器，用来霸占手机的后台通知栏和麦克风
 const SILENT_B64 = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjEyLjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIAD+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+AAAAAExhdmM1OC4xMgAAAAAAAAAAAAAAACQAAAAAAAAAAAEgAEiAAAAB//OEAAAAAEMASAAAAAAAQAEAAQAAAEAAoB4AAgCBAgIBAQEBAgIBAQEBAQICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA=';
 let globalCallAudio = new Audio();
 globalCallAudio.playsInline = true;
@@ -37,7 +35,7 @@ function setupPiP() {
   pipCtx = pipCanvas.getContext('2d');
   pipVideo = document.createElement('video');
   pipVideo.muted = true; pipVideo.playsInline = true; pipVideo.autoplay = true;
-  pipVideo.style.display = 'none'; // 挂载到DOM但隐藏，以骗过部分浏览器
+  pipVideo.style.display = 'none';
   document.body.appendChild(pipVideo);
   pipVideo.srcObject = pipCanvas.captureStream(10);
   pipVideo.play().catch(()=>{});
@@ -49,7 +47,6 @@ function updatePiP(status) {
   pipCtx.font = '80px Arial'; pipCtx.textAlign = 'center'; pipCtx.fillText('🦀', 150, 130);
   pipCtx.font = '24px Arial'; pipCtx.fillStyle = '#d4a574'; pipCtx.fillText('我们的家', 150, 180);
   pipCtx.font = '18px Arial'; pipCtx.fillStyle = '#7d7a72'; pipCtx.fillText(status, 150, 240);
-  // 👉 强制更新锁屏通知栏状态
   if ('mediaSession' in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({ title: '🦀 我们的家', artist: status, album: '语音通话' });
   }
@@ -94,7 +91,7 @@ function acceptCall(){
   document.getElementById('callWindow').style.display='block';
   document.getElementById('callBtn').style.color='var(--ac)';
   
-  keepAliveAudio(); // 保持后台存活
+  keepAliveAudio();
   
   callTimerInterval=setInterval(()=>{
     callSeconds++;
@@ -207,14 +204,14 @@ function monitorVAD() {
     vadSilenceTimer = null;
   } else {
     if (isDetectingSpeech && !vadSilenceTimer) {
-      // 延长等待时间，防止断句被误判
+      // 👉 恢复到 1.6 秒，给你充足的思考停顿时间，防止话说一半被切断
       vadSilenceTimer = setTimeout(() => {
          isDetectingSpeech = false;
          vadSilenceTimer = null;
          if(vadRecorder.state !== 'inactive') vadRecorder.stop();
          setCallStatus('识别中...');
          animateCallWave(false);
-      }, 1000);
+      }, 1600);
     }
   }
 }
@@ -223,7 +220,8 @@ async function processVADAudio() {
   if (vadChunks.length === 0) { setCallStatus('在听...'); return; }
   const blob = new Blob(vadChunks, { type: 'audio/webm' });
   vadChunks = [];
-  if (blob.size < 4000) { setCallStatus('在听...'); return; }
+  // 👉 降低文件体积要求，防止漏掉合法的短句
+  if (blob.size < 2000) { setCallStatus('在听...'); return; }
   
   const fd = new FormData();
   fd.append('audio', blob, 'voice.webm');
@@ -232,7 +230,6 @@ async function processVADAudio() {
     const d = await r.json();
     let txt = d.text || '';
     
-    // 👉 核心修复：全面封杀 Whisper 常见的发呆幻觉
     const badWords = ['字幕', '观看', '订阅', '点赞', '收藏', '三连', '频道', '谢谢', 'Thank', '欢迎', '收看', '拜拜', '由AI生成', '再见', '不客气', 'AI'];
     if (badWords.some(w => txt.includes(w)) && txt.length < 25) {
         txt = ''; 
@@ -242,7 +239,9 @@ async function processVADAudio() {
       setCallStatus('你：' + txt.slice(0, 12) + (txt.length > 12 ? '...' : ''));
       sendCallMessage(txt);
     } else {
-      setCallStatus('在听...');
+      // 👉 提示没听清，而不是毫无反应
+      setCallStatus('没听清...');
+      setTimeout(() => { if(!callSpeaking) setCallStatus('在听...') }, 1000);
     }
   } catch (err) {
     setCallStatus('识别失败');
@@ -250,17 +249,49 @@ async function processVADAudio() {
   }
 }
 
+const FILLER_WORDS=['嗯…','让我想想','这个嘛…','嗯嗯'];
+let fillerAudios={};
+async function preloadFillers(){
+  if(!cfg.base)return;
+  for(const word of FILLER_WORDS){
+    try{
+      const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/voice/tts',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:word,emotion:'平静',channel:cfg.ttsChannel||'minimax',lang:'zh',call_mode:true}),
+      });
+      if(r.ok){
+        const blob=await r.blob();
+        fillerAudios[word]=URL.createObjectURL(blob);
+      }
+    }catch(e){}
+  }
+}
+
+let fillerTimer=null;
+function playFiller(){
+  const words=Object.keys(fillerAudios);
+  if(!words.length)return;
+  const url=fillerAudios[words[Math.floor(Math.random()*words.length)]];
+  if(currentAudio){currentAudio.pause();currentAudio=null;}
+  currentAudio=new Audio(url);
+  currentAudio.play();
+  currentAudio.onended=()=>{currentAudio=null;};
+}
+
 let audioQueue=[];
 let audioPlaying=false;
 function enqueueAudio(base64,format='mp3'){
+  if (!callActive) return; // 👉 挂断后绝对不排队！防闹鬼
   audioQueue.push({base64,format});
   if(!audioPlaying)drainAudioQueue();
 }
 async function drainAudioQueue(){
   if(audioPlaying||!audioQueue.length) {
-      if(!audioPlaying && callActive) keepAliveAudio(); // 队列播完立刻接上静音保持后台
+      if(!audioPlaying && callActive) keepAliveAudio();
       return;
   }
+  if (!callActive) return; // 👉 挂断后绝对不播！
+
   audioPlaying=true;
   const {base64,format}=audioQueue.shift();
   try{
@@ -273,16 +304,22 @@ async function drainAudioQueue(){
     globalCallAudio.loop = false;
     globalCallAudio.src = url;
     
-    globalCallAudio.onended=()=>{
+    // 👉 同时绑定 onended 和 onerror，防止任何意外卡死
+    const cleanup = () => {
       globalCallAudio.onended = null;
       globalCallAudio.onerror = null;
       audioPlaying=false;
       URL.revokeObjectURL(url);
       drainAudioQueue();
     };
-    globalCallAudio.onerror=()=>{audioPlaying=false;drainAudioQueue();};
+    
+    globalCallAudio.onended = cleanup;
+    globalCallAudio.onerror = cleanup;
     await globalCallAudio.play();
-  }catch(e){audioPlaying=false;drainAudioQueue();}
+  }catch(e){
+    audioPlaying=false;
+    drainAudioQueue();
+  }
 }
 
 async function sendCallMessage(text){
@@ -293,11 +330,7 @@ async function sendCallMessage(text){
   setCallStatus('他在想...');animateCallWave(false);callSpeaking=true;
   audioQueue=[];audioPlaying=false;
 
-  // 👉 只有 30% 的概率会发垫音，显得更像真人偶尔思考
-  if (Math.random() < 0.3) {
-    playFiller();
-  }
-
+  if (Math.random() < 0.3) playFiller();
 
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/stream',{
@@ -312,6 +345,7 @@ async function sendCallMessage(text){
     let sseBuf='';
 
     while(true){
+      if(!callActive) break; // 👉 如果已经挂断，立刻掐断水管！防闹鬼
       const {done,value}=await reader.read();
       if(done)break;
       sseBuf+=decoder.decode(value,{stream:true});
@@ -332,7 +366,8 @@ async function sendCallMessage(text){
         }catch(e){}
       }
     }
-    if(sseBuf.startsWith('data: ')){
+    
+    if(callActive && sseBuf.startsWith('data: ')){
       try{
         const evt=JSON.parse(sseBuf.slice(6));
         if(evt.type==='audio')enqueueAudio(evt.audio,evt.format||'mp3');
@@ -342,27 +377,33 @@ async function sendCallMessage(text){
 
     if(fullReply) callTranscriptLog.push({role:'assistant',content:fullReply,ts:new Date().toISOString()});
 
+    // 👉 终极防卡死保险：如果遇到各种奇葩断流，20秒后强行踢开播放器把麦克风给你！
     await new Promise(resolve=>{
       let waitCycles = 0;
       const check=setInterval(()=>{
-        // 👇 核心修复：不再被“无限循环的静音”迷惑，只要真实的语音播完了，立刻轮到你说话！
+        // 发现被静音骗了，或者播放器卡死，强行解脱
+        if (audioPlaying && (globalCallAudio.paused || globalCallAudio.ended)) audioPlaying = false;
+        
         if(!audioPlaying && audioQueue.length === 0){
           waitCycles++;
           if (waitCycles > 2) { clearInterval(check); resolve(); }
         } else {
           waitCycles = 0;
         }
-      }, 200);
-      // 这里的 30000 就是你体感到的“快 30 秒”，现在它只是个保险丝了
-      setTimeout(()=>{ clearInterval(check); resolve(); }, 30000); 
+      },200);
+      
+      setTimeout(()=>{ 
+         clearInterval(check); 
+         audioPlaying = false; audioQueue = []; 
+         resolve(); 
+      }, 20000); 
     });
 
-
   }catch(e){
-    setCallStatus('出错了，继续说...');
+    if(callActive) setCallStatus('出错了，继续说...');
   }finally{
-    callSpeaking=false;animateCallWave(false);
-    if(callActive)startListening();
+    callSpeaking=false; animateCallWave(false);
+    if(callActive) startListening();
   }
 }
 
@@ -379,7 +420,13 @@ async function endCall(){
   
   if(document.pictureInPictureElement) document.exitPictureInPicture().catch(()=>{});
   
+  // 👉 挂断时瞬间清空所有积压的语音
+  audioQueue = []; 
+  audioPlaying = false;
   globalCallAudio.pause();
+  globalCallAudio.removeAttribute('src');
+  globalCallAudio.load();
+  
   setCallStatus('通话结束');
   await new Promise(r=>setTimeout(r,800));
   document.getElementById('callWindow').style.display='none';
@@ -461,25 +508,19 @@ async function deleteCallRecord(id, startedAt, e) {
   e.stopPropagation();
   if(!confirm('确定删除这条通话记录吗？对应的聊天卡片也会被清除哦。')) return;
   
-  // 1. 先瞬间隐藏通话记录面板里的那一行
   const row = e.target.closest('div[style*="padding:10px 0"]');
   if (row) row.style.display = 'none';
   
-  // 2. 找到对应的聊天卡片，前端立刻“秒删”并刷新（0延迟体验核心）
+  try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }); } catch(e){}
+  
   const st = new Date(startedAt).getTime();
   const card = messages.find(m => m.type === 'call-card' && Math.abs(new Date(m.ts).getTime() - st) < 300000);
   if(card) {
-      messages = messages.filter(m => m.id !== card.id);
-      saveMessages(); renderMessages(); // 立刻刷新界面
-  }
-
-  // 3. 后台偷偷去删数据库，不卡界面
-  try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/call/records/' + id, { method: 'DELETE' }); } catch(e){}
-  if(card) {
       try { await fetch(cfg.base.replace(/\/+$/,'')+'/api/messages/' + card.id, { method: 'DELETE' }); } catch(e){}
+      messages = messages.filter(m => m.id !== card.id);
+      saveMessages(); renderMessages();
   }
 }
-
 
 function toggleCallDetail(id){const el=document.getElementById(id);if(el)el.style.display=el.style.display==='none'?'block':'none';}
 
@@ -505,12 +546,4 @@ function makeDraggable(el){
     document.removeEventListener('mouseup',onEnd);document.removeEventListener('touchend',onEnd);
   };
   el.addEventListener('mousedown',onStart);el.addEventListener('touchstart',onStart,{passive:true});
-}
-// 👉 补充丢失的通话面板外壳渲染函数
-function renderCallsPanel() {
-  const el = document.getElementById('panelContent');
-  if(!el) return;
-  el.innerHTML = `<div class="panel-hdr"><span class="panel-title">通话记录</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-  <div id="callRecordList" style="padding:0 4px"><div style="color:var(--td);font-size:12px;padding:12px 0">加载中...</div></div>`;
-  renderCallRecords();
 }
