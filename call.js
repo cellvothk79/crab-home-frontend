@@ -124,31 +124,10 @@ function animateCallWave(active){
 
 function startListening(){
   if(!callActive||callSpeaking)return;
-  const isMobile = window.innerWidth <= 600 || /Mobi/i.test(navigator.userAgent);
-  const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
-  
-  if(!SR || isMobile) {
-    startVADListening();
-    return;
-  }
-  
-  callRecognition=new SR();
-  callRecognition.lang='zh-CN';
-  callRecognition.continuous=false;
-  callRecognition.interimResults=true;
-  let finalText='';
-  callRecognition.onstart=()=>{setCallStatus('在听...');animateCallWave(false);};
-  callRecognition.onresult=(e)=>{
-    finalText='';let interim='';
-    for(const r of e.results){if(r.isFinal)finalText+=r[0].transcript;else interim+=r[0].transcript;}
-    if(interim||finalText)setCallStatus('你：'+(finalText||interim));
-    clearTimeout(callSilenceTimer);
-    if(finalText)callSilenceTimer=setTimeout(()=>sendCallMessage(finalText),1500);
-  };
-  callRecognition.onerror=(e)=>{ if(callActive&&!callSpeaking)setTimeout(startListening,500); };
-  callRecognition.onend=()=>{ if(callActive&&!callSpeaking)setTimeout(startListening,300); };
-  try{callRecognition.start();}catch(e){}
+  // 👉 彻底抛弃自带的拉垮识别，不管电脑还是手机，全都走我们强大的 VAD 黑科技！
+  startVADListening();
 }
+
 
 async function startVADListening() {
   if(vadStream) return;
@@ -546,4 +525,12 @@ function makeDraggable(el){
     document.removeEventListener('mouseup',onEnd);document.removeEventListener('touchend',onEnd);
   };
   el.addEventListener('mousedown',onStart);el.addEventListener('touchstart',onStart,{passive:true});
+}
+// 👉 找回丢失的面板渲染函数
+function renderCallsPanel() {
+  const el = document.getElementById('panelContent');
+  if(!el) return;
+  el.innerHTML = `<div class="panel-hdr"><span class="panel-title">通话记录</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+  <div id="callRecordList" style="padding:0 4px"><div style="color:var(--td);font-size:12px;padding:12px 0">加载中...</div></div>`;
+  renderCallRecords();
 }
