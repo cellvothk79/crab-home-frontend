@@ -169,4 +169,22 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
 .time-seg { display:flex; gap:5px; margin-bottom:6px; align-items:center; }
 .time-seg input { flex:1; background:var(--bg); border:1px solid var(--bd); color:var(--t); font-size:11px; padding:4px 6px; border-radius:4px; }
 
+/* ════ 一起听 & 你画我猜 专属样式 ════ */
+/* 黑胶唱片机 */
+.music-widget { position:fixed; top:65px; right:15px; background:rgba(30,29,35,0.8); backdrop-filter:blur(10px); border:1px solid var(--bd); border-radius:12px; padding:10px; display:flex; align-items:center; gap:10px; z-index:90; box-shadow:0 4px 15px rgba(0,0,0,0.4); transform:translateX(120%); transition:0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.music-widget.show { transform:translateX(0); }
+.vinyl-record { width:40px; height:40px; border-radius:50%; background:#111; border:2px solid #333; position:relative; animation:spin 4s linear infinite; animation-play-state:paused; flex-shrink:0; overflow:hidden; }
+.vinyl-record.playing { animation-play-state:running; }
+.vinyl-record img { width:16px; height:16px; border-radius:50%; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); object-fit:cover; }
+@keyframes spin { 100% { transform:rotate(360deg); } }
+.music-info { flex:1; max-width:120px; }
+.music-name { font-size:11px; color:var(--t); font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.music-artist { font-size:9px; color:var(--td); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* 画板 */
+#drawingBoard { position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,0.8); display:none; flex-direction:column; align-items:center; justify-content:center; }
+.canvas-container { background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
+.canvas-tools { display:flex; gap:15px; padding:10px; background:var(--s2); width:100%; justify-content:center; border-radius:12px 12px 0 0; }
+.color-btn { width:24px; height:24px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
+.color-btn.active { border-color:#fff; transform:scale(1.2); }
+
 </style>
