@@ -1310,52 +1310,37 @@ function saveMemEdit(id){
 }
 function softDelMem(id){
   if(!confirm('移入回收站？'))return;
+  // 👇 抓取你点击的那一行，瞬间隐藏它，不刷新整个列表！
+  const e = window.event;
+  if (e && e.target) {
+      const row = e.target.closest('div[style*="padding:8px 10px"]');
+      if (row) row.style.display = 'none';
+  }
   if(!cfg.base)return;
-  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id,{method:'DELETE'})
-    .then(()=>loadMemList(document.getElementById('memSearch')?.value||''))
-    .catch(e=>alert(e.message));
-}
-function showMemTrash(){
-  const el=document.getElementById('memList');if(!el||!cfg.base)return;
-  document.getElementById('memTrashBtn').textContent='← 返回';
-  document.getElementById('memTrashBtn').onclick=()=>{document.getElementById('memTrashBtn').textContent='🗑 回收站';document.getElementById('memTrashBtn').onclick=showMemTrash;loadMemList('');};
-  el.innerHTML='<p style="color:var(--tf);font-size:11px;margin-bottom:8px">回收站中的记忆不会被AI读取，可恢复或永久删除</p>';
-  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/trash').then(r=>r.json()).then(data=>{
-    if(!data.length){el.innerHTML+='<p style="color:var(--tf);font-size:12px;text-align:center;padding:10px">回收站是空的</p>';return;}
-    
-    // 👇 核心修复：加了一个霸气的红色“一键清空”按钮！
-    const idsString = JSON.stringify(data.map(m=>m.id));
-    el.innerHTML+=`<button onclick='emptyMemTrash(${idsString})' style="width:100%;margin-bottom:10px;padding:8px;background:rgba(200,80,80,.1);border:1px solid rgba(200,80,80,.2);border-radius:8px;color:#c46;font-size:12px;cursor:pointer">💥 一键清空所有回收站</button>`;
-    
-    el.innerHTML+=data.map(m=>`
-      <div style="background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin-bottom:6px;opacity:.7">
-        <div style="font-size:12.5px;margin-bottom:5px">${esc(m.summary)}</div>
-        <div style="display:flex;gap:5px">
-          <button onclick="restoreMem(${m.id})" style="flex:1;padding:5px;background:var(--acl);border:1px solid var(--acb);border-radius:6px;color:var(--ac);font-size:11px;cursor:pointer">恢复</button>
-          <button onclick="permDelMem(${m.id})" style="flex:1;padding:5px;background:rgba(200,80,80,.1);border:1px solid rgba(200,80,80,.2);border-radius:6px;color:#c46;font-size:11px;cursor:pointer">永久删除</button>
-        </div>
-      </div>`).join('');
-  }).catch(()=>{});
-}
-
-// 配合上面按钮的清空函数
-async function emptyMemTrash(ids) {
-    if(!confirm('确定要彻底清空回收站吗？此操作不可恢复！')) return;
-    const el=document.getElementById('memList');
-    el.innerHTML = '<div style="color:var(--td);text-align:center;padding:20px">正在清空...</div>';
-    await Promise.all(ids.map(id => fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/permanent', {method:'DELETE'}).catch(()=>{})));
-    showMemTrash();
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id,{method:'DELETE'}).catch(()=>{});
 }
 
 function restoreMem(id){
+  const e = window.event;
+  if (e && e.target) {
+      const row = e.target.closest('div[style*="padding:8px 10px"]');
+      if (row) row.style.display = 'none';
+  }
   if(!cfg.base)return;
-  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/restore',{method:'POST'}).then(()=>showMemTrash()).catch(e=>alert(e.message));
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/restore',{method:'POST'}).catch(()=>{});
 }
+
 function permDelMem(id){
   if(!confirm('永久删除？此操作不可撤销。'))return;
+  const e = window.event;
+  if (e && e.target) {
+      const row = e.target.closest('div[style*="padding:8px 10px"]');
+      if (row) row.style.display = 'none';
+  }
   if(!cfg.base)return;
-  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/permanent',{method:'DELETE'}).then(()=>showMemTrash()).catch(e=>alert(e.message));
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/permanent',{method:'DELETE'}).catch(()=>{});
 }
+
 async function addMemManual(){
   const v=document.getElementById('memAddInp')?.value?.trim();
   if(!v)return;
@@ -1621,10 +1606,20 @@ async function saveNewMedia() {
       body: JSON.stringify({ session_id: currentSession.id, media_type: type, title, cover_url: cover })
     });
     const d = await r.json();
+    
+    // 👇 核心修复：如果后端报错，弹窗显示错误原因，而不是默默失败
+    if (!r.ok || d.error) {
+        alert('保存失败: ' + (d.error || '未知错误'));
+        return;
+    }
+    
     allMedia.unshift(d);
     renderMediaPanel();
-  } catch(e) { alert('保存失败'); }
+  } catch(e) { 
+    alert('保存异常: ' + e.message); 
+  }
 }
+
 
 // 👉 详情弹窗 (草稿编辑 vs 完结展示)
 function showMediaDetail(id) {
