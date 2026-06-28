@@ -1221,8 +1221,18 @@ function applyPreset(i){
   localStorage.setItem('cc_apikey_backup',p.apiKey);
   localStorage.setItem('cc_apibase_backup',p.apiBase);
   localStorage.setItem('cc_model_backup',p.model);
+  
+  // 👇 核心新增：你一换预设，立刻把最新的 Key 和模型名字同步给后端的数据库！
+  if(cfg.base){
+    fetch(cfg.base.replace(/\/+$/,'')+'/api/settings',{
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ api_key: p.apiKey, api_base: p.apiBase, model_name: p.model })
+    }).catch(()=>{});
+  }
+  
   updatePresetBtn();closePanel();
 }
+
 
 function editPreset(i){
   const p=i>=0?{...cfg.presets[i]}:{id:null,name:'',apiBase:'',apiKey:'',model:'', monitorUrl:'', homeUrl:''};
