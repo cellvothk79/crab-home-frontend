@@ -1052,11 +1052,17 @@ function ctxAct(action){
   if(action==='select'){selMode=true;selected=new Set([m.id]);updateSelBar();renderMessages();}
   if(action==='inner'){showInnerThought(m);}
 }
+// 👉 给心声弹窗加上收藏功能！
 async function showInnerThought(m){
   const popup=document.getElementById('innerPopup');
   const text=document.getElementById('innerPopupText');
   popup.style.display='flex';
   text.innerHTML='<span style="opacity:.5">感受中...</span>';
+  
+  // 每次打开先清空旧的收藏按钮
+  const oldBtn = document.getElementById('collectMoodBtn');
+  if(oldBtn) oldBtn.remove();
+
   try{
     const r=await fetch(cfg.base.replace(/\/+$/,'')+'/api/mood/generate',{
       method:'POST',headers:{'Content-Type':'application/json'},
@@ -1066,6 +1072,30 @@ async function showInnerThought(m){
     if(d.mood){
       text.textContent=d.mood;
       m.innerThought=d.mood;
+      
+      // 👇 核心新增：生成一个收藏按钮
+      const cBtn = document.createElement('button');
+      cBtn.id = 'collectMoodBtn';
+      cBtn.innerHTML = '⭐ 收藏这句心声';
+      cBtn.style.cssText = 'width:100%;margin-top:12px;padding:8px;background:rgba(212,165,116,.1);border:1px solid rgba(212,165,116,.3);border-radius:8px;color:var(--ac);font-size:12px;cursor:pointer;';
+      cBtn.onclick = () => {
+        // 将对话的起因、结果、心声一起打包存入收藏夹
+        favs.unshift({
+          type: 'inner_thought',
+          mood: d.mood,
+          context_user: d.context_user || '',
+          context_ai: d.context_ai || m.content || '',
+          savedAt: new Date().toISOString()
+        });
+        save(K.favs, favs);
+        cBtn.textContent = '✅ 已珍藏';
+        cBtn.style.background = 'var(--s2)';
+        cBtn.style.color = 'var(--td)';
+        cBtn.disabled = true;
+      };
+      // 把按钮插在关闭按钮的上面
+      text.parentNode.insertBefore(cBtn, text.nextElementSibling);
+
     } else {
       text.textContent='他此刻什么都没想...';
     }
@@ -1073,6 +1103,7 @@ async function showInnerThought(m){
     text.textContent='生成失败，稍后再试';
   }
 }
+
 function onMsgClick(id){if(selMode){selected.has(id)?selected.delete(id):selected.add(id);updateSelBar();renderMessages();}}
 function updateSelBar(){
   document.getElementById('selBar').style.display=selMode?'flex':'none';
@@ -1493,6 +1524,8 @@ function renderFavsPanel(){
   const groups=favs.filter(f=>f.type==='group');
   const voiceSingles=singles.filter(f=>f.msg.type==='voice');
   const textSingles=singles.filter(f=>f.msg.type!=='voice');
+  // 👇 把美味心声单独提出来
+  const innerThoughts = favs.filter(f => f.type === 'inner_thought');
 
   function renderFavMsg(m,inGroup=false){
     if(m.type==='voice'){
@@ -1555,10 +1588,25 @@ function renderFavsPanel(){
     return`<div class="fav-group"><div class="fav-group-hdr"><div><span style="font-size:12.5px;font-weight:500;color:var(--ac)">${esc(f.title)}</span><span style="font-size:10px;color:var(--tf);margin-left:7px">${f.msgs.length} 条</span></div><div style="display:flex;gap:5px"><button class="h-btn" onclick="toggleFavGroup(${idx})">${f.collapsed?'展开':'折叠'}</button><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:13px" onclick="delFav(${idx})">×</button></div></div>${inner}</div>`;
   }).join('')}</div>`:'';
 
-  const isEmpty=!favs.length;
-  return`<div class="panel-hdr"><span class="panel-title">收藏夹</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-    ${isEmpty?'<p style="font-size:12px;color:var(--tf);text-align:center;padding:20px 0">还没有收藏，右键消息选收藏</p>':(textHtml+voiceHtml+groupHtml)}`;
-}
+  // 👇 核心新增：专属的“美味心声”展示区域
+  const innerHtml = innerThoughts.length ? `<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">美味心声</div>${innerThoughts.map((f,i)=>{
+    const idx=favs.indexOf(f);
+    return `<div class="fav-single" style="border-color:rgba(212,165,116,0.3); background:rgba(212,165,116,0.03);">
+      <div style="font-size:10px;color:var(--tf);margin-bottom:8px;display:flex;justify-content:space-between;">
+          <span>${fmtTime(f.savedAt)} · 他的内心活动</span>
+          <button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:10px;" onclick="delFav(${idx})">删除</button>
+      </div>
+      ${f.context_user ? `<div style="font-size:11.5px;color:var(--t);margin-bottom:4px;opacity:0.8;">👩 你：${esc(f.context_user)}</div>` : ''}
+      ${f.context_ai ? `<div style="font-size:11.5px;color:var(--ac);margin-bottom:8px;opacity:0.8;">🦀 他：${esc(f.context_ai)}</div>` : ''}
+      <div style="font-size:12.5px;color:var(--t);line-height:1.6;font-style:italic;background:var(--s1);padding:10px;border-radius:6px;border-left:2px solid var(--ac);">💭 "${esc(f.mood)}"</div>
+    </div>`;
+  }).join('')}</div>` : '';
+
+  // 别忘了把 innerHtml 加到最终的返回结果里！(替换原来的 return)
+  const isEmpty = !favs.length;
+  return `<div class="panel-hdr"><span class="panel-title">收藏夹</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+    ${isEmpty ? '<p style="font-size:12px;color:var(--tf);text-align:center;padding:20px 0">还没有收藏，右键消息选收藏</p>' : (innerHtml + textHtml + voiceHtml + groupHtml)}`;
+
 
 let favAudio=null;
 function playFavVoice(id,url){
