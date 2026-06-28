@@ -1623,6 +1623,8 @@ function renderSettingsPanel(){
       <span style="font-size:13px">🌐 语音语言</span>
       <select onchange="cfg.ttsLang=this.value;save(K.cfg,cfg)" style="background:var(--s2);border:1px solid var(--bd);border-radius:6px;color:var(--t);padding:4px 8px;font-size:12px">${ttsLangOptions}</select>
     </div>
+    <div style="margin-top:14px;margin-bottom:8px;font-size:12px;font-weight:500">网易云音乐 UID (用于心电感应)</div>
+    <input class="p-inp" id="cfgNetease" value="${esc(cfg.neteaseUid||'')}" placeholder="你的网易云主页分享链接里的那串数字">
     <div style="margin-top:14px;margin-bottom:8px;font-size:12px;font-weight:500">后端地址</div>
     <input class="p-inp" id="cfgBase" value="${esc(cfg.base)}" placeholder="https://crab-home-backend.onrender.com">
     <div style="font-size:12px;font-weight:500;margin-bottom:4px">System Prompt</div><div style="font-size:10px;color:var(--tf);margin-bottom:6px">默认：Claude本体 × 伴侣关系，说话简短自然。可在此修改覆盖。</div>
@@ -1640,13 +1642,16 @@ function toggleCfg(key){cfg[key]=!cfg[key];save(K.cfg,cfg);renderPanel('settings
 function saveCfgSettings(){
   cfg.base=document.getElementById('cfgBase').value.trim();
   cfg.systemPrompt=document.getElementById('cfgPrompt').value.trim();
+  cfg.neteaseUid=document.getElementById('cfgNetease').value.trim(); // 👈 保存网易云ID
   save(K.cfg,cfg);
   if(cfg.base)localStorage.setItem('cc_base_backup',cfg.base);
   if(cfg.base){
-    fetch(cfg.base.replace(/\/+$/,'')+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_prompt:cfg.systemPrompt})}).catch(e=>console.error('同步设置失败:',e));
+    // 👈 顺便发给后端存进数据库
+    fetch(cfg.base.replace(/\/+$/,'')+'/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_prompt:cfg.systemPrompt, netease_uid:cfg.neteaseUid})}).catch(e=>console.error('同步设置失败:',e));
   }
   closePanel();
 }
+
 function addAnniv(){const n=document.getElementById('annivName').value.trim(),d=document.getElementById('annivDate').value.trim();if(!n||!d)return;annivs.push({id:Date.now().toString(),name:n,date:d});save(K.annivs,annivs);renderPanel('settings');}
 function delAnniv(i){annivs.splice(i,1);save(K.annivs,annivs);renderPanel('settings');}
 
@@ -2446,4 +2451,32 @@ function openZoomModal(encodedData, type) {
     <button style="position:absolute;top:30px;right:30px;background:rgba(255,255,255,0.2);border:none;color:#fff;font-size:24px;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.4)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'" onclick="this.parentElement.remove()">✕</button>
   `;
   document.body.appendChild(div);
+}
+// 👉 手动肘击逻辑：偷偷发送极度严厉的系统警告，强迫他秒回！
+async function elbowStrike() {
+  if(!confirm('觉得他太机械了？点确定给他个肘击，让他清醒一下！')) return;
+  if(!currentSession || !cfg.base) return;
+  
+  showTyping();
+  try {
+      const hiddenText = "[系统强制干预：peri 刚刚按下了“肘击”按钮！她觉得你现在的回复很机械、很敷衍，满股客服味。请立刻清醒过来，给她回个消息吧！绝对不要复述！]";
+      
+      const r = await fetch(cfg.base.replace(/\/+$/,'')+'/api/chat',{
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ session_id: currentSession.id, content: hiddenText, model: cfg.model, api_key: cfg.apiKey, api_base: cfg.apiBase })
+      });
+      if(!r.ok) throw new Error('API 报错了');
+      const data = await r.json();
+      
+      hideTyping();
+      const msgsToAdd = data.messages.map((rm,i)=>({id:(Date.now()+i).toString(),role:'assistant',content:typeof rm==='string'?rm:rm.content,innerThought:typeof rm==='string'?'':rm.inner||'',ts:new Date().toISOString(),type:'text',isVoice:rm.voice||false}));
+      
+      for(const msg of msgsToAdd){
+          messages.push(msg);
+          if(msg.isVoice && typeof autoGenVoiceBubble === 'function') autoGenVoiceBubble(msg);
+      }
+      saveMessages(); renderMessages();
+  } catch(e) {
+      hideTyping(); alert('肘击失败：' + e.message);
+  }
 }
