@@ -524,7 +524,10 @@ async function send(){
   }
   saveMessages();renderMessages();
   const combinedContent=allTexts.join('\n---msg---\n');
-
+  let finalContent = combinedContent || text;
+  if (window._activeMusic) {
+      finalContent += `\n[系统感知：放映室的黑胶唱片机正在播放背景音乐《${window._activeMusic}》，请结合这首歌的氛围回复]`;
+  }
   const showTodo=isTodoQuery(text);
   detectAnniv(text);
 
@@ -1118,17 +1121,20 @@ async function renderDesirePanel() {
 
     // 👉 加上了 cursor:pointer 和 onclick，点任意一个条就能画折线图！
     const renderBar = (key, label, val, color) => {
-      const pct = Math.min(100, Math.max(0, val * 100)).toFixed(1);
+      // 👇 核心修复：防止空值报错
+      const safeVal = Number(val || 0);
+      const pct = Math.min(100, Math.max(0, safeVal * 100)).toFixed(1);
       return `
       <div style="margin-bottom:12px; cursor:pointer;" onclick="showDesireChart('${key}', '${label}', '${color}')" title="点击查看历史趋势图">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--td);margin-bottom:4px">
-          <span>${label} (点我查波形)</span><span>${val.toFixed(2)}</span>
+          <span>${label} (点我查波形)</span><span>${safeVal.toFixed(2)}</span>
         </div>
         <div style="width:100%;height:6px;background:var(--s2);border-radius:3px;overflow:hidden;border:1px solid var(--bd)">
           <div style="width:${pct}%;height:100%;background:${color};transition:width 0.5s ease"></div>
         </div>
       </div>`;
     };
+
 
 
     let html = `<div style="padding: 10px; background: rgba(212,165,116,0.05); border: 1px solid rgba(212,165,116,0.2); border-radius: 12px; margin-bottom: 16px;">`;
@@ -2166,6 +2172,9 @@ async function delSticker(id) {
 
 // --- 音乐模块 ---
 let globalMusic = new Audio();
+// 增加全局变量记录当前播放的歌
+window._activeMusic = ''; 
+
 async function openMusicSearch() {
   const q = prompt('想和他一起听什么歌？(输入歌名或歌手)');
   if(!q) return;
@@ -2178,25 +2187,36 @@ async function openMusicSearch() {
       document.getElementById('vinylCover').src = d.cover;
       document.getElementById('musicWidget').classList.add('show');
       
-      // 发送隐蔽提示给 AI
-      stageMessage(`[系统提示：peri 刚刚在放映室点播了 ${d.name} - ${d.artist}，这首歌正在播放，请结合氛围跟我聊天]`);
-      send();
+      // 👇 核心修复1：只在后台静默记录，绝对不发到聊天界面里！
+      window._activeMusic = `${d.name} - ${d.artist}`;
 
-      // 如果有试听链接，就播出来
+      const recordEl = document.getElementById('vinylRecord');
       if(d.preview) {
         globalMusic.src = d.preview;
         globalMusic.play();
-        document.getElementById('vinylRecord').classList.add('playing');
-        globalMusic.onended = () => {
-           document.getElementById('vinylRecord').classList.remove('playing');
-        };
+        recordEl.classList.add('playing');
+        globalMusic.onended = () => { recordEl.classList.remove('playing'); window._activeMusic = ''; };
       } else {
-        // 纯展示封面（VIP逻辑），让唱片悄悄转
-        document.getElementById('vinylRecord').classList.add('playing');
+        recordEl.classList.add('playing');
       }
+
+      // 👇 核心修复2：点击唱片机，实现暂停/继续播放！
+      recordEl.onclick = () => {
+         if(!globalMusic.src) return;
+         if(globalMusic.paused) { globalMusic.play(); recordEl.classList.add('playing'); }
+         else { globalMusic.pause(); recordEl.classList.remove('playing'); }
+      };
+
     } else { alert('没搜到这首歌呀~'); }
   } catch(e) { alert('搜歌失败'); }
 }
+
+function closeMusic() {
+  document.getElementById('musicWidget').classList.remove('show');
+  globalMusic.pause(); document.getElementById('vinylRecord').classList.remove('playing');
+  window._activeMusic = ''; // 关掉音乐就清除后台状态
+}
+
 function closeMusic() {
   document.getElementById('musicWidget').classList.remove('show');
   globalMusic.pause(); document.getElementById('vinylRecord').classList.remove('playing');
@@ -2252,13 +2272,13 @@ function clearCanvas() {
 function sendDrawing() {
   const canvas = document.getElementById('dCanvas');
   const b64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-  const m = {id:Date.now().toString(), role:'user', content:'猜猜我画的是什么？', ts:new Date().toISOString(), type:'image', imageUrl:canvas.toDataURL('image/jpeg'), imageBase64:b64, imageMime:'image/jpeg'};
+  // 👇 修复：不再强行写文字，只发图片，然后把光标交给你自己打字！
+  const m = {id:Date.now().toString(), role:'user', content:'', ts:new Date().toISOString(), type:'image', imageUrl:canvas.toDataURL('image/jpeg'), imageBase64:b64, imageMime:'image/jpeg'};
   messages.push(m); saveMessages(); renderMessages();
   document.getElementById('drawingBoard').style.display = 'none';
-  // 伪造发送动作
-  document.getElementById('msgInput').value = '我们在玩你画我猜！看看我画的是什么？';
-  send();
+  document.getElementById('msgInput').focus(); // 光标跳回输入框让你自己说话
 }
+
 
 let desireChartInstance = null;
 
