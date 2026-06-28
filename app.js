@@ -1665,43 +1665,55 @@ async function saveNewMedia() {
 
 
 // 👉 详情弹窗 (草稿编辑 vs 完结展示)
+// 👉 格式化本地时间，供日历组件使用
+const formatLocal = (iso) => {
+    if(!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 function showMediaDetail(id) {
   const m = allMedia.find(x => x.id === id);
   if(!m) return;
   const el = document.getElementById('panelContent');
 
   if (m.status === 'draft') {
-    // 【草稿模式】：填时间段、填分数、准备生成！
+    // 👇 核心修复1：改用 type="datetime-local"，直接弹出系统原生的小日历让你选！
     const segHtml = (m.time_segments || []).map((seg, i) => `
-      <div class="time-seg">
+      <div class="time-seg" id="seg_div_${i}">
          <span style="color:var(--td);font-size:11px">段落${i+1}</span>
-         <input type="text" id="ts_start_${i}" value="${seg.start}" placeholder="2026-06-28 14:00">
+         <input type="datetime-local" id="ts_start_${i}" value="${formatLocal(seg.start)}">
          <span style="color:var(--td)">-</span>
-         <input type="text" id="ts_end_${i}" value="${seg.end}" placeholder="2026-06-28 16:00">
+         <input type="datetime-local" id="ts_end_${i}" value="${formatLocal(seg.end)}">
       </div>
     `).join('');
 
     el.innerHTML = `
     <div class="panel-hdr"><span class="panel-title">✏️ 维护进度：${esc(m.title)}</span><button class="h-btn" onclick="renderMediaPanel()">返回</button></div>
     
-    <label class="p-label">你的最终打分 (1-5)</label>
+    <label class="p-label">目前的打分预估 (1-5，完结时才生效)</label>
     <input type="number" class="p-inp" id="mScore" value="${m.user_score||5}" min="1" max="5">
     
-    <label class="p-label" style="margin-top:10px">截取陪伴记忆 (填入你们讨论这件作品的时间)</label>
-    <div style="font-size:10px; color:var(--tf); margin-bottom:8px">格式：YYYY-MM-DD HH:MM</div>
+    <label class="p-label" style="margin-top:10px">截取陪伴记忆 (点框框直接选时间)</label>
     <div id="segContainer">${segHtml}</div>
-    <button class="h-btn" style="width:100%; margin-bottom:20px; border-style:dashed;" onclick="addSegUI()">+ 增加一个时间段</button>
+    
+    <div style="display:flex; gap:10px; margin-top:8px; margin-bottom:20px;">
+       <button class="h-btn" style="flex:1; border-style:dashed;" onclick="addSegUI()">+ 增加时间段</button>
+       <!-- 👇 核心修复2：加了一个显眼的暂存进度按钮！ -->
+       <button class="h-btn" style="flex:1; color:var(--ac); border-color:var(--ac)" onclick="saveMediaDraft('${m.id}')">💾 保存当前进度</button>
+    </div>
     
     <div style="background:rgba(200,80,80,0.1); border:1px solid rgba(200,80,80,0.3); border-radius:8px; padding:10px; margin-bottom:15px; text-align:center;">
        <div style="color:#c46; font-size:11px; font-weight:bold; margin-bottom:4px">⚠️ 完结警告</div>
-       <div style="color:var(--td); font-size:10px">点击下方按钮，将把截取的时间段发给大模型（Claude）撰写陪伴回忆。请确保后端 API 为按次计费模型以免破产！</div>
+       <div style="color:var(--td); font-size:10px">点击下方按钮，将把截取的时间段发给大模型写评价。确认这段旅程结束了吗？</div>
     </div>
     
     <button class="p-btn save" id="genBtn" onclick="generateMediaReview('${m.id}')">🎉 完结撒花！召唤大模型生成回忆</button>
     <button class="h-btn" style="width:100%; margin-top:10px; color:#c46; border-color:rgba(200,80,80,0.3);" onclick="delMedia('${m.id}')">删除此草稿</button>
     `;
   } else {
-    // 【已完结模式】：展示海报、双人评分和纯净聊天记录
+    // 已完结界面保持不变
     let chatLogHtml = '';
     if (m.pure_chat_history && m.pure_chat_history.length > 0) {
       chatLogHtml = m.pure_chat_history.map(c => `
@@ -1751,13 +1763,42 @@ function addSegUI() {
   const count = container.children.length;
   const div = document.createElement('div');
   div.className = 'time-seg';
+  div.id = 'seg_div_' + count;
   div.innerHTML = `
      <span style="color:var(--td);font-size:11px">段落${count+1}</span>
-     <input type="text" id="ts_start_${count}" placeholder="格式: YYYY-MM-DD HH:MM">
+     <input type="datetime-local" id="ts_start_${count}">
      <span style="color:var(--td)">-</span>
-     <input type="text" id="ts_end_${count}" placeholder="格式: YYYY-MM-DD HH:MM">
+     <input type="datetime-local" id="ts_end_${count}">
   `;
   container.appendChild(div);
+}
+
+// 👉 核心修复3：新增的“保存草稿进度”函数
+async function saveMediaDraft(id) {
+  const score = document.getElementById('mScore').value;
+  const container = document.getElementById('segContainer');
+  let segments = [];
+  
+  for(let i=0; i<container.children.length; i++) {
+     const st = document.getElementById('ts_start_'+i)?.value;
+     const ed = document.getElementById('ts_end_'+i)?.value;
+     if(st && ed) {
+         segments.push({ start: new Date(st).toISOString(), end: new Date(ed).toISOString() });
+     }
+  }
+  
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + id, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user_score: score, time_segments: segments })
+    });
+    const d = await r.json();
+    const idx = allMedia.findIndex(m=>m.id === id);
+    if(idx !== -1) allMedia[idx] = d;
+    alert('进度暂存成功！放心退出吧！');
+  } catch(e) {
+    alert('保存失败: ' + e.message);
+  }
 }
 
 async function generateMediaReview(id) {
@@ -1767,9 +1808,9 @@ async function generateMediaReview(id) {
   let segments = [];
   
   for(let i=0; i<container.children.length; i++) {
-     const st = document.getElementById('ts_start_'+i).value.trim();
-     const ed = document.getElementById('ts_end_'+i).value.trim();
-     if(st && ed) segments.push({ start: st, end: ed });
+     const st = document.getElementById('ts_start_'+i)?.value;
+     const ed = document.getElementById('ts_end_'+i)?.value;
+     if(st && ed) segments.push({ start: new Date(st).toISOString(), end: new Date(ed).toISOString() });
   }
   if(segments.length === 0) return alert('请至少填写一个讨论时间段！');
 
@@ -1777,13 +1818,11 @@ async function generateMediaReview(id) {
   btn.disabled = true;
 
   try {
-    // 1. 先保存填写的状态
     await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + id, {
       method: 'PATCH', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ user_score: score, time_segments: segments })
     });
 
-    // 2. 发起大模型总结请求
     const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + id + '/generate', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ api_key: cfg.apiKey, api_base: cfg.apiBase, model: cfg.model })
@@ -1794,7 +1833,6 @@ async function generateMediaReview(id) {
         throw new Error(err.error || '生成失败');
     }
     
-    // 成功！刷新面板
     await loadMediaRecords();
     showMediaDetail(id);
     
@@ -1813,3 +1851,4 @@ async function delMedia(id) {
     renderMediaPanel();
   } catch(e) {}
 }
+
