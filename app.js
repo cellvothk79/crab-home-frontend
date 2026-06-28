@@ -2323,3 +2323,25 @@ async function showDesireChart(metricKey, label, color) {
     <div style="color:#c46;font-size:12px;text-align:center;padding:20px">画图失败了: ${e.message}</div>`;
   }
 }
+// 👉 控制微信级加号面板的展开与收起
+function toggleExpandPanel() {
+  const p = document.getElementById('expandPanel');
+  const btn = document.getElementById('btnExpand');
+  
+  if (p.style.display === 'none') {
+    p.style.display = 'block';
+    // 旋转45度变成一个小叉叉，逼格拉满
+    btn.style.transform = 'rotate(45deg)';
+    btn.style.color = 'var(--ac)';
+    btn.style.borderColor = 'var(--acb)';
+    btn.style.background = 'var(--acl)';
+    scrollEnd(); // 展开时自动把聊天记录顶上去
+  } else {
+    p.style.display = 'none';
+    // 恢复原状
+    btn.style.transform = 'rotate(0deg)';
+    btn.style.color = 'var(--td)';
+    btn.style.borderColor = 'var(--bd)';
+    btn.style.background = 'var(--s2)';
+  }
+}
