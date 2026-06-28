@@ -551,10 +551,7 @@ async function send(){
   }
   saveMessages();renderMessages();
   const combinedContent=allTexts.join('\n---msg---\n');
-  let finalContent = combinedContent || text;
-  if (window._activeMusic) {
-      finalContent += `\n[系统感知：放映室的黑胶唱片机正在播放背景音乐《${window._activeMusic}》，请结合这首歌的氛围回复]`;
-  }
+
   const showTodo=isTodoQuery(text);
   detectAnniv(text);
 
@@ -2278,10 +2275,7 @@ function closeMusic() {
   window._activeMusic = ''; // 关掉音乐就清除后台状态
 }
 
-function closeMusic() {
-  document.getElementById('musicWidget').classList.remove('show');
-  globalMusic.pause(); document.getElementById('vinylRecord').classList.remove('playing');
-}
+
 
 // --- 画板模块 ---
 let ctx, isDrawing = false;
