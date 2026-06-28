@@ -2433,4 +2433,3 @@ function openZoomModal(encodedData, type) {
   `;
   document.body.appendChild(div);
 }
-
