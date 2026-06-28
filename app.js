@@ -1645,7 +1645,7 @@ function showAddMedia() {
   <button class="p-btn save" onclick="saveNewMedia()">保存草稿</button>`;
 }
 
-// 👉 呼叫后端去百度找图
+// 👉 呼叫后端去搜图
 async function autoSearchCover() {
   const title = document.getElementById('mTitle').value.trim();
   const type = document.getElementById('mType').value;
@@ -1662,13 +1662,14 @@ async function autoSearchCover() {
       // 直接在界面上展示搜到的海报预览！
       document.getElementById('coverPreview').innerHTML = `<img src="${d.url}" style="height:140px; object-fit:cover; border-radius:6px; border:1px solid var(--ac); box-shadow:0 2px 10px rgba(0,0,0,0.3)">`;
     } else {
-      alert('没搜到合适的封面，麻烦你自己去百度复制一张图片链接贴进来吧~');
+      alert('没搜到合适的封面，麻烦你自己去豆瓣或者百度复制一张图片链接贴进来吧~');
     }
   } catch(e) {
     alert('搜图失败啦，请手动粘贴链接');
   }
   btn.textContent = '🔍 自动搜图'; btn.disabled = false;
 }
+
 
 
 async function saveNewMedia() {
