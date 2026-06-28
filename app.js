@@ -352,22 +352,23 @@ function renderMsg(m){
   let svgMatch = safeTxt.match(/```(?:xml|svg|html)?\n*(<svg[\s\S]*?<\/svg>)\n*```/i) || safeTxt.match(/(<svg[\s\S]*?<\/svg>)/i);
   let svgCode = '';
   if (svgMatch) {
-      svgCode = svgMatch[1]; // 提取出真实的 svg 代码
+      svgCode = svgMatch[1]; 
       safeTxt = safeTxt.replace(svgMatch[0], '[SVG_PLACEHOLDER]');
   }
-  safeTxt = esc(safeTxt); // 过滤其他文字
+  safeTxt = esc(safeTxt); 
   if (svgCode) {
-      // 把画渲染在一个白色的漂亮画框里
-      safeTxt = safeTxt.replace('[SVG_PLACEHOLDER]', `<div style="background:#fff;padding:10px;border-radius:8px;margin-top:5px;width:100%;overflow:hidden;">${svgCode}</div>`);
+      // 👉 加上了 onclick 放大事件！
+      safeTxt = safeTxt.replace('[SVG_PLACEHOLDER]', `<div style="background:#fff;padding:10px;border-radius:8px;margin-top:5px;width:100%;overflow:hidden;cursor:zoom-in;" onclick="openZoomModal(this.innerHTML)">${svgCode}</div>`);
   }
 
-  // 👇 修复 3：如果你发了图片，文字和图片一起显示，绝不吞字！
+  // 👇 修复 3：如果你发了图片，文字和图片一起显示，并且图片可点击放大！
   if(m.type==='image') {
-      inner=`<img src="${m.imageUrl}" alt="图片" style="max-width:160px; border-radius:8px; display:block;">`;
+      inner=`<img src="${m.imageUrl}" alt="图片" style="max-width:160px; border-radius:8px; display:block; cursor:zoom-in;" onclick="openZoomModal('<img src=\\'${m.imageUrl}\\' style=\\'max-width:100%;max-height:100%;object-fit:contain;\\'>')">`;
       if (safeTxt.trim()) inner += `<div style="margin-top:4px;">${safeTxt}</div>`;
   } else {
       inner=`<span style="white-space:pre-wrap">${safeTxt}</span>`;
   }
+
 
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
   const ttsBtn=(!isU&&cfg.base)?`<button onclick="playTTS(event,'${m.id}')" style="background:none;border:none;color:var(--td);font-size:12px;cursor:pointer;padding:2px 4px;opacity:.6" title="听语音">🔊</button>`:'';
@@ -2301,26 +2302,27 @@ async function showDesireChart(metricKey, label, color) {
   
   try {
     const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/desires/' + currentSession.id + '/history');
-    const historyData = await r.json();
+    let historyData = await r.json();
     
+    // 👉 核心修复：如果没有历史记录，直接把当前的状态拿过来凑一个点，坚决不显示空数据！
     if (historyData.length === 0) {
-      el.innerHTML = `<div class="panel-hdr"><span class="panel-title">📈 ${label}</span><button class="h-btn" onclick="renderDesirePanel()">返回</button></div>
-      <div style="color:var(--tf);font-size:12px;text-align:center;padding:30px">还没有收集到足够的心跳历史，等他跳几下再来看吧~</div>`;
-      return;
+       const currR = await fetch(cfg.base.replace(/\/+$/, '') + '/api/desires/' + currentSession.id);
+       const curr = await currR.json();
+       if(curr) historyData = [curr];
     }
 
     const labels = historyData.map(d => {
-       const dt = new Date(d.created_at);
+       const dt = new Date(d.created_at || d.updated_at || Date.now());
        return `${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
     });
     const dataPoints = historyData.map(d => d[metricKey] || 0);
 
     el.innerHTML = `
-    <div class="panel-hdr"><span class="panel-title">📈 ${label} - 趋势</span><button class="h-btn" onclick="renderDesirePanel()">返回</button></div>
+    <div class="panel-hdr"><span class="panel-title">📈 ${label}</span><button class="h-btn" onclick="renderDesirePanel()">返回</button></div>
     <div style="background:var(--s2); border:1px solid var(--bd); border-radius:12px; padding:10px; margin-bottom:15px;">
        <canvas id="desireChartCanvas" width="300" height="200"></canvas>
     </div>
-    <div style="font-size:10px; color:var(--tf); text-align:center;">显示最近几次的心跳历史波动。如果在聊天，数值会被重置。</div>`;
+    <div style="font-size:10px; color:var(--tf); text-align:center;">显示心跳历史波动，点点滴滴都在记录。</div>`;
 
     const ctx = document.getElementById('desireChartCanvas').getContext('2d');
     if (desireChartInstance) desireChartInstance.destroy();
@@ -2336,8 +2338,8 @@ async function showDesireChart(metricKey, label, color) {
           backgroundColor: color + '33',
           borderWidth: 2,
           fill: true,
-          tension: 0.4, // 平滑曲线
-          pointRadius: 2
+          tension: 0.4,
+          pointRadius: 3
         }]
       },
       options: {
@@ -2355,6 +2357,7 @@ async function showDesireChart(metricKey, label, color) {
     <div style="color:#c46;font-size:12px;text-align:center;padding:20px">画图失败了: ${e.message}</div>`;
   }
 }
+
 // 👉 控制微信级加号面板的展开与收起
 function toggleExpandPanel() {
   const p = document.getElementById('expandPanel');
@@ -2376,4 +2379,16 @@ function toggleExpandPanel() {
     btn.style.borderColor = 'var(--bd)';
     btn.style.background = 'var(--s2)';
   }
+}
+// 👉 全屏放大查看图片或画作
+function openZoomModal(contentHtml) {
+  const div = document.createElement('div');
+  div.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(5px);';
+  div.innerHTML = `
+    <div style="position:relative;max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center;">
+       ${contentHtml}
+    </div>
+    <button style="position:absolute;top:30px;right:30px;background:rgba(255,255,255,0.2);border:none;color:#fff;font-size:24px;width:40px;height:40px;border-radius:50%;cursor:pointer;" onclick="this.parentElement.remove()">✕</button>
+  `;
+  document.body.appendChild(div);
 }
