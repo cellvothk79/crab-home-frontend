@@ -349,6 +349,13 @@ function renderMsg(m){
   
   // 👇 修复 2：终极画板解析器
   let safeTxt = m.content || '';
+  if (!isU) {
+      const aiQuoteMatch = safeTxt.match(/\[quote:\s*([\s\S]*?)\]/i);
+      if (aiQuoteMatch) {
+          q = `<div class="quote-preview" style="border-left:2px solid var(--t); background:rgba(255,255,255,0.05)"><span style="opacity:.6">回复你: </span>${esc(aiQuoteMatch[1].slice(0,55))}...</div>`;
+          safeTxt = safeTxt.replace(aiQuoteMatch[0], '').trim();
+      }
+  }
   let svgMatch = safeTxt.match(/```(?:xml|svg|html)?\n*(<svg[\s\S]*?<\/svg>)\n*```/i) || safeTxt.match(/(<svg[\s\S]*?<\/svg>)/i);
   let svgCode = '';
   if (svgMatch) {
