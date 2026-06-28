@@ -1944,20 +1944,30 @@ function renderMonitorPanel() {
   const hUrl = p?.homeUrl || '';
   const el = document.getElementById('panelContent');
 
-  let iframeHtml = mUrl 
-      ? `<iframe src="${mUrl}" style="width:100%; height:400px; border:1px solid var(--bd); border-radius:8px; background:#fff; margin-bottom:15px;"></iframe>`
+  // 👉 核心修复：既然不让内嵌，我们直接改成炫酷的“新窗口直达”大按钮！
+  let monitorHtml = mUrl 
+      ? `<div style="background:var(--s2); border:1px solid var(--bd); border-radius:8px; padding:30px 10px; text-align:center; margin-bottom:15px;">
+           <div style="font-size:40px; margin-bottom:10px;">📊</div>
+           <div style="font-size:12px; color:var(--td); margin-bottom:15px; line-height:1.6">
+              中转站开启了安全防护，拒绝在小窗中显示。<br>请点击下方按钮，去大屏查看各模型的实时红绿灯！
+           </div>
+           <button class="p-btn" style="background:var(--acl); color:var(--ac); border:1px solid var(--acb); padding:10px 20px; font-size:13px" onclick="window.open('${mUrl}', '_blank')">
+              🚀 新标签页打开【模型监控】
+           </button>
+         </div>`
       : `<div style="text-align:center; padding:40px 0; color:var(--tf); font-size:12px; border:1px dashed var(--bd); border-radius:8px; margin-bottom:15px;">当前预设没有配置【监控网址】哦<br>去“预设”里编辑加上吧</div>`;
 
   let btnHtml = hUrl
-      ? `<button class="p-btn save" onclick="window.open('${hUrl}', '_blank')">💰 去主页查余额 / 充值 (新窗口打开)</button>`
+      ? `<button class="p-btn save" style="padding:12px; font-size:13px;" onclick="window.open('${hUrl}', '_blank')">💰 去主页查余额 / 充值 (新标签页)</button>`
       : `<button class="p-btn" style="background:var(--s2); color:var(--tf); cursor:not-allowed" disabled>未配置主页网址</button>`;
 
   el.innerHTML = `
-    <div class="panel-hdr"><span class="panel-title">📊 中转站监控 (当前: ${esc(p?.name||'未知')})</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-    ${iframeHtml}
+    <div class="panel-hdr"><span class="panel-title">📊 中转站入口 (当前: ${esc(p?.name||'未知')})</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+    ${monitorHtml}
     ${btnHtml}
   `;
 }
+
 
 function renderSearchPanel() {
   const el = document.getElementById('panelContent');
