@@ -1495,29 +1495,40 @@ function renderFavsPanel(){
         ${displayContent?`<div style="font-size:11px;color:var(--td);margin-top:4px">${esc(displayContent)}</div>`:''}
       </div>`;
     }
-    return`<div style="background:${m.role==='user'?'#1f1c17':'var(--s1)'};border:1px solid ${m.role==='user'?'rgba(212,165,116,.12)':'var(--bd)'};border-radius:9px;padding:6px 10px;font-size:12.5px;line-height:1.5;display:inline-block;max-width:100%">${esc(m.content||'[图片]')}</div>`;
+
+    // 👇 核心修复 1：把聊天框的“魔法解析器”原样搬进收藏夹！让代码变成画！
+    let safeTxt = m.content || '';
+    let svgMatch = safeTxt.match(/```(?:xml|svg|html)?\n*(<svg[\s\S]*?<\/svg>)\n*```/i) || safeTxt.match(/(<svg[\s\S]*?<\/svg>)/i);
+    let svgCode = '';
+    if (svgMatch) {
+        svgCode = svgMatch[1]; 
+        safeTxt = safeTxt.replace(svgMatch[0], '[SVG_PLACEHOLDER]');
+    }
+    safeTxt = esc(safeTxt); 
+    
+    if (svgCode) {
+        // 给收藏夹里的画也加上白色画框和点击放大功能！
+        let fixedSvg = svgCode.replace(/<svg/i, '<svg style="width:100%; height:auto; max-height:120px; display:block;"');
+        let encodedSvg = encodeURIComponent(svgCode);
+        safeTxt = safeTxt.replace('[SVG_PLACEHOLDER]', `<div style="background:#fff;padding:6px;border-radius:6px;margin-top:4px;width:100%;overflow:hidden;cursor:zoom-in;box-shadow:inset 0 0 4px rgba(0,0,0,0.1);" onclick="openZoomModal('${encodedSvg}', 'svg')">${fixedSvg}</div>`);
+    }
+    
+    if (typeof sysStickers !== 'undefined') {
+        safeTxt = safeTxt.replace(/\[sticker:([a-zA-Z0-9_]+)\]/g, (match, sid) => {
+            const s = sysStickers.find(x => x.sticker_id === sid);
+            return s ? `<br><img src="${s.image_url}" style="width:80px; height:80px; object-fit:contain; background:transparent; margin:4px 0; cursor:zoom-in;" onclick="openZoomModal('${encodeURIComponent(s.image_url)}', 'image')"><br>` : match;
+        });
+    }
+
+    if(m.type==='image') {
+        let encodedImg = encodeURIComponent(m.imageUrl);
+        let inner = `<img src="${m.imageUrl}" style="max-width:140px; border-radius:6px; display:block; cursor:zoom-in;" onclick="openZoomModal('${encodedImg}', 'image')">`;
+        if (safeTxt.trim()) inner += `<div style="margin-top:4px;">${safeTxt}</div>`;
+        return `<div style="background:${m.role==='user'?'#1f1c17':'var(--s1)'};border:1px solid ${m.role==='user'?'rgba(212,165,116,.12)':'var(--bd)'};border-radius:9px;padding:6px 10px;font-size:12.5px;line-height:1.5;display:inline-block;max-width:100%">${inner}</div>`;
+    }
+
+    return`<div style="background:${m.role==='user'?'#1f1c17':'var(--s1)'};border:1px solid ${m.role==='user'?'rgba(212,165,116,.12)':'var(--bd)'};border-radius:9px;padding:6px 10px;font-size:12.5px;line-height:1.5;display:inline-block;max-width:100%">${safeTxt}</div>`;
   }
-
-  const textHtml=textSingles.length?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">文字</div>${textSingles.map((f,i)=>{
-    const idx=favs.indexOf(f);
-    return`<div class="fav-single"><div style="font-size:10px;color:var(--tf);margin-bottom:5px">${fmtTime(f.msg.savedAt||f.msg.ts)} · ${f.msg.role==='user'?'你':'他'}</div>${renderFavMsg(f.msg)}<div><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:10px;margin-top:5px" onclick="delFav(${idx})">删除</button></div></div>`;
-  }).join('')}</div>`:'';
-
-  const voiceHtml=voiceSingles.length?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">语音</div>${voiceSingles.map((f,i)=>{
-    const idx=favs.indexOf(f);
-    return`<div class="fav-single"><div style="font-size:10px;color:var(--tf);margin-bottom:5px">${fmtTime(f.msg.savedAt||f.msg.ts)} · ${f.msg.role==='user'?'你':'他'}</div>${renderFavMsg(f.msg)}<div><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:10px;margin-top:5px" onclick="delFav(${idx})">删除</button></div></div>`;
-  }).join('')}</div>`:'';
-
-  const groupHtml=groups.length?`<div style="margin-bottom:16px"><div style="font-size:11px;color:var(--td);margin-bottom:8px">组合</div>${groups.map((f,i)=>{
-    const idx=favs.indexOf(f);
-    const inner=f.collapsed?'':`<div style="border-top:1px solid var(--bd);padding-top:8px;margin-top:8px">${f.msgs.map(m=>`<div style="margin-bottom:7px"><div style="font-size:10px;color:var(--tf);margin-bottom:3px">${m.role==='user'?'你':'他'} · ${fmtTime(m.ts)}</div>${renderFavMsg(m,true)}</div>`).join('')}</div>`;
-    return`<div class="fav-group"><div class="fav-group-hdr"><div><span style="font-size:12.5px;font-weight:500;color:var(--ac)">${esc(f.title)}</span><span style="font-size:10px;color:var(--tf);margin-left:7px">${f.msgs.length} 条</span></div><div style="display:flex;gap:5px"><button class="h-btn" onclick="toggleFavGroup(${idx})">${f.collapsed?'展开':'折叠'}</button><button style="background:none;border:none;color:var(--tf);cursor:pointer;font-size:13px" onclick="delFav(${idx})">×</button></div></div>${inner}</div>`;
-  }).join('')}</div>`:'';
-
-  const isEmpty=!favs.length;
-  return`<div class="panel-hdr"><span class="panel-title">收藏夹</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-    ${isEmpty?'<p style="font-size:12px;color:var(--tf);text-align:center;padding:20px 0">还没有收藏，右键消息选收藏</p>':(textHtml+voiceHtml+groupHtml)}`;
-}
 
 let favAudio=null;
 function playFavVoice(id,url){
@@ -1525,7 +1536,13 @@ function playFavVoice(id,url){
   if(!url)return;
   favAudio=new Audio(url);favAudio.play();
 }
-function delFav(i){favs.splice(i,1);save(K.favs,favs);renderPanel('favs');}
+
+// 👇 核心修复 2：给删除按钮加上灵魂拷问！
+function delFav(i){
+  if(!confirm('确定要从收藏夹里移除这条回忆吗？')) return;
+  favs.splice(i,1); save(K.favs,favs); renderPanel('favs');
+}
+
 function toggleFavGroup(i){favs[i].collapsed=!favs[i].collapsed;save(K.favs,favs);renderPanel('favs');}
 
 function renderDiaryPanel(){
