@@ -1422,22 +1422,20 @@ function renderDiaryPanel(){
 
 function loadDiaryList(){
   if(!cfg.base)return;
-  fetch(cfg.base.replace(/\/+$/,'')+'/api/diary')
-    .then(r=>r.json())
-    .then(data=>{
-      const list=document.getElementById('diaryList');
-      if(!list)return;
+  fetch(cfg.base.replace(/\/+$/,'')+'/api/diary').then(r=>r.json()).then(data=>{
+      const list=document.getElementById('diaryList');if(!list)return;
       if(!data.length){list.innerHTML='<p style="font-size:12px;color:var(--tf);text-align:center;padding:20px 0">还没有日记，多聊聊他可能会写</p>';return;}
+      // 👇 核心修复：加了 cursor:pointer 和 display:none 的折叠逻辑！
       list.innerHTML=data.map(d=>`<div class="diary-item">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+        <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="const b=this.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none'">
           <span style="font-size:12.5px;font-weight:500;color:var(--ac)">${esc(d.title||'无题')}</span>
-          <span style="font-size:10px;color:var(--tf)">${fmtTime(d.created_at)}${d.mood?' · '+esc(d.mood):''}</span>
+          <span style="font-size:10px;color:var(--tf)">${fmtTime(d.created_at)}${d.mood?' · '+esc(d.mood):''} ▼</span>
         </div>
-        <div style="font-size:12.5px;line-height:1.6;color:var(--t);font-style:italic">${esc(d.content)}</div>
+        <div style="font-size:12.5px;line-height:1.6;color:var(--t);font-style:italic;display:none;margin-top:8px;border-top:1px dashed rgba(212,165,116,0.2);padding-top:8px">${esc(d.content).replace(/\n/g, '<br>')}</div>
       </div>`).join('');
-    })
-    .catch(()=>{const list=document.getElementById('diaryList');if(list)list.innerHTML='<p style="color:#c46;font-size:12px;text-align:center">加载失败</p>';});
+    }).catch(()=>{const list=document.getElementById('diaryList');if(list)list.innerHTML='<p style="color:#c46;font-size:12px;text-align:center">加载失败</p>';});
 }
+
 
 async function forceDiary(){
   if(!cfg.base||!currentSession){alert('需要先连接后端并开始对话');return;}
