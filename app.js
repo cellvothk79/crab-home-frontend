@@ -1606,7 +1606,7 @@ function renderFavsPanel(){
   const isEmpty = !favs.length;
   return `<div class="panel-hdr"><span class="panel-title">收藏夹</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
     ${isEmpty ? '<p style="font-size:12px;color:var(--tf);text-align:center;padding:20px 0">还没有收藏，右键消息选收藏</p>' : (innerHtml + textHtml + voiceHtml + groupHtml)}`;
-
+}
 
 let favAudio=null;
 function playFavVoice(id,url){
