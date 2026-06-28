@@ -59,6 +59,17 @@ let nowTimer=null;
   loadStickers();
   checkAnnivs();
   setTimeout(refreshHeaderMood, 500);
+  
+  // 👉 每 10 秒向后端抛一个媚眼，告诉他你在线，并顺便看看有没有新消息
+  setInterval(async () => {
+    if (!currentSession || !cfg.base || document.visibilityState !== 'visible') return;
+    const lastTs = messages.length ? messages[messages.length-1].ts : '';
+    try {
+      const r = await fetch(cfg.base.replace(/\/+$/, '') + `/api/heartbeat/${currentSession.id}?last_ts=${lastTs}`);
+      const d = await r.json();
+      if (d.hasNew) loadMessages(); // 如果有新消息（比如他主动发来的），立刻静默刷新界面显示出来！
+    } catch(e){}
+  }, 10000);
 
   // 尝试安全调用 call.js 里的垫音预加载
   if (typeof preloadFillers === 'function') {
@@ -1105,17 +1116,20 @@ async function renderDesirePanel() {
     const d = await desireRes.json();
     const q = await queueRes.json();
 
-    const renderBar = (label, val, color) => {
+    // 👉 加上了 cursor:pointer 和 onclick，点任意一个条就能画折线图！
+    const renderBar = (key, label, val, color) => {
       const pct = Math.min(100, Math.max(0, val * 100)).toFixed(1);
-      return `<div style="margin-bottom:12px">
+      return `
+      <div style="margin-bottom:12px; cursor:pointer;" onclick="showDesireChart('${key}', '${label}', '${color}')" title="点击查看历史趋势图">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--td);margin-bottom:4px">
-          <span>${label}</span><span>${val.toFixed(2)}</span>
+          <span>${label} (点我查波形)</span><span>${val.toFixed(2)}</span>
         </div>
         <div style="width:100%;height:6px;background:var(--s2);border-radius:3px;overflow:hidden;border:1px solid var(--bd)">
           <div style="width:${pct}%;height:100%;background:${color};transition:width 0.5s ease"></div>
         </div>
       </div>`;
     };
+
 
     let html = `<div style="padding: 10px; background: rgba(212,165,116,0.05); border: 1px solid rgba(212,165,116,0.2); border-radius: 12px; margin-bottom: 16px;">`;
     html += renderBar('💓 想念程度 (Attachment) - 满0.7触发', d.attachment || 0, '#d4a574');
