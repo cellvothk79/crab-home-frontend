@@ -1620,22 +1620,56 @@ function renderMediaGrid() {
 }
 
 // 👉 新增弹窗
+// 👉 带有自动搜图功能的弹窗
 function showAddMedia() {
   const el = document.getElementById('panelContent');
   el.innerHTML = `
   <div class="panel-hdr"><span class="panel-title">新建进度草稿</span><button class="h-btn" onclick="renderMediaPanel()">取消</button></div>
   <label class="p-label">类别</label>
   <select id="mType" class="p-inp"><option value="movie" ${mediaType==='movie'?'selected':''}>🎬 电影/剧集</option><option value="game" ${mediaType==='game'?'selected':''}>🎮 游戏</option></select>
+  
   <label class="p-label">名字</label>
-  <input class="p-inp" id="mTitle" placeholder="例如：黑神话悟空">
-  <label class="p-label">封面图片地址 (可选)</label>
-  <input class="p-inp" id="mCover" placeholder="直接粘贴网络图片网址...">
+  <input class="p-inp" id="mTitle" placeholder="例如：星际穿越">
+  
+  <label class="p-label">封面图片地址</label>
+  <div style="display:flex; gap:5px; margin-bottom:8px;">
+    <input class="p-inp" id="mCover" style="margin-bottom:0;flex:1" placeholder="点击右侧自动搜图，或手动粘贴">
+    <button class="h-btn" onclick="autoSearchCover()" id="btnSearchCover" style="color:var(--ac); border-color:var(--ac)">🔍 自动搜图</button>
+  </div>
+  
+  <div id="coverPreview" style="text-align:center; margin-bottom:10px; min-height:10px;"></div>
   
   <div style="font-size:11px; color:var(--tf); margin-top:10px; margin-bottom:20px;">
     建好草稿后，你就可以随时把你们的讨论时间段塞进去了。等彻底看完/玩完，再一键让大模型生成回忆！
   </div>
   <button class="p-btn save" onclick="saveNewMedia()">保存草稿</button>`;
 }
+
+// 👉 呼叫后端去百度找图
+async function autoSearchCover() {
+  const title = document.getElementById('mTitle').value.trim();
+  const type = document.getElementById('mType').value;
+  if(!title) return alert('请先输入名字，我才能去搜图呀！');
+  
+  const btn = document.getElementById('btnSearchCover');
+  btn.textContent = '搜图中...'; btn.disabled = true;
+  
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/cover?title=' + encodeURIComponent(title) + '&type=' + type);
+    const d = await r.json();
+    if(d.url) {
+      document.getElementById('mCover').value = d.url;
+      // 直接在界面上展示搜到的海报预览！
+      document.getElementById('coverPreview').innerHTML = `<img src="${d.url}" style="height:140px; object-fit:cover; border-radius:6px; border:1px solid var(--ac); box-shadow:0 2px 10px rgba(0,0,0,0.3)">`;
+    } else {
+      alert('没搜到合适的封面，麻烦你自己去百度复制一张图片链接贴进来吧~');
+    }
+  } catch(e) {
+    alert('搜图失败啦，请手动粘贴链接');
+  }
+  btn.textContent = '🔍 自动搜图'; btn.disabled = false;
+}
+
 
 async function saveNewMedia() {
   const type = document.getElementById('mType').value;
