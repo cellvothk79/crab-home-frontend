@@ -1167,13 +1167,10 @@ async function renderDesirePanel() {
     };
 
     let html = `<div style="padding: 10px; background: rgba(212,165,116,0.05); border: 1px solid rgba(212,165,116,0.2); border-radius: 12px; margin-bottom: 16px;">`;
-    html += renderBar('attachment', '💓 想念程度 (Attachment) - 满0.7触发', d.attachment, '#d4a574');
-    html += renderBar('stress', '🌩️ 情绪压力 (Stress)', d.stress, '#c46');
-    html += renderBar('libido', '🫂 亲密驱动 (Libido)', d.libido, '#e585b6');
-    html += renderBar('duty', '📌 记挂责任 (Duty)', d.duty, '#6478b4');
+    html += renderBar('attachment', '💓 想念程度 (Attachment)', d.attachment, '#d4a574');
     html += renderBar('reflection', '📖 沉淀回忆 (Reflection)', d.reflection, '#888');
-    html += renderBar('fatigue', '💤 疲劳控制 (Fatigue) - 满0.8罢工', d.fatigue, '#555');
     html += `<div style="font-size:10px;color:var(--tf);text-align:right;margin-top:4px">最后心跳跳动: ${fmtTime(d.updated_at)}</div></div>`;
+
 
     html += `<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--t)">💌 偷偷藏在身后的纸条 (待发送)</div>`;
     if (q.length === 0) {
