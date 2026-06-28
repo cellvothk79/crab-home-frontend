@@ -72,10 +72,14 @@
       <button onclick="toggleLink()" style="padding:7px 8px;background:none;border:1px solid var(--bd);border-radius:8px;color:var(--td);font-size:12.5px;cursor:pointer">✕</button>
     </div>
     <div class="staged-area" id="stagedArea"></div>
+     <div id="stickerPicker" style="display:none; position:absolute; bottom:100%; left:10px; right:10px; background:var(--s2); border:1px solid var(--bd); border-radius:12px; padding:10px; margin-bottom:10px; max-height:200px; overflow-y:auto; box-shadow:0 -4px 20px rgba(0,0,0,0.5); z-index:100;">
+       <div id="stickerGrid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(60px, 1fr)); gap:10px;"></div>
+    </div>
     <div class="input-bar" style="position:relative">
 
       <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="sendImage(event)">
       <button class="ic-btn normal" onclick="document.getElementById('fileInput').click()" title="发图片">📎</button>
+      <button class="ic-btn normal" id="btnSticker" onclick="toggleStickerPicker()" title="发表情">🙂</button>
       <button class="ic-btn normal" id="voiceRecBtn" onclick="toggleVoiceRec()" title="按住录音">🎙</button>
       <textarea class="ta" id="msgInput" placeholder="回车暂存，发送键发出…" rows="1"
         oninput="onInput(this)" onkeydown="handleKey(event)"></textarea>
