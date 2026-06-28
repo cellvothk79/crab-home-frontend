@@ -347,7 +347,7 @@ function renderMsg(m){
   
   let inner='';
   
-  // 👇 修复 2：终极画板解析器，把大模型的 SVG 代码变成真实的画！
+  // 👇 修复 2：终极画板解析器
   let safeTxt = m.content || '';
   let svgMatch = safeTxt.match(/```(?:xml|svg|html)?\n*(<svg[\s\S]*?<\/svg>)\n*```/i) || safeTxt.match(/(<svg[\s\S]*?<\/svg>)/i);
   let svgCode = '';
@@ -357,17 +357,29 @@ function renderMsg(m){
   }
   safeTxt = esc(safeTxt); 
   if (svgCode) {
-      // 👉 加上了 onclick 放大事件！
-      safeTxt = safeTxt.replace('[SVG_PLACEHOLDER]', `<div style="background:#fff;padding:10px;border-radius:8px;margin-top:5px;width:100%;overflow:hidden;cursor:zoom-in;" onclick="openZoomModal(this.innerHTML)">${svgCode}</div>`);
+      // 👈 核心修复：强行注入 CSS，让画作 100% 填满气泡，绝对不会再缩成三个字那么小！
+      let fixedSvg = svgCode.replace(/<svg/i, '<svg style="width:100%; height:auto; min-height:150px; display:block;"');
+      // 把原始代码编码，传给放大镜，绝对不丢失！
+      let encodedSvg = encodeURIComponent(svgCode);
+      safeTxt = safeTxt.replace('[SVG_PLACEHOLDER]', `<div style="background:#fff;padding:10px;border-radius:8px;margin-top:5px;width:100%;overflow:hidden;cursor:zoom-in;box-shadow:inset 0 0 4px rgba(0,0,0,0.1);" onclick="openZoomModal('${encodedSvg}', 'svg')">${fixedSvg}</div>`);
   }
 
-  // 👇 修复 3：如果你发了图片，文字和图片一起显示，并且图片可点击放大！
+  // 👇 修复 3：如果你发了图片，文字和图片一起显示，并且安全传给放大镜！
   if(m.type==='image') {
-      inner=`<img src="${m.imageUrl}" alt="图片" style="max-width:160px; border-radius:8px; display:block; cursor:zoom-in;" onclick="openZoomModal('<img src=\\'${m.imageUrl}\\' style=\\'max-width:100%;max-height:100%;object-fit:contain;\\'>')">`;
+      let encodedImg = encodeURIComponent(m.imageUrl);
+      inner=`<img src="${m.imageUrl}" alt="图片" style="max-width:160px; border-radius:8px; display:block; cursor:zoom-in;" onclick="openZoomModal('${encodedImg}', 'image')">`;
       if (safeTxt.trim()) inner += `<div style="margin-top:4px;">${safeTxt}</div>`;
   } else {
+      // 表情包渲染逻辑保留
+      if (typeof sysStickers !== 'undefined') {
+          safeTxt = safeTxt.replace(/\[sticker:([a-zA-Z0-9_]+)\]/g, (match, sid) => {
+              const s = sysStickers.find(x => x.sticker_id === sid);
+              return s ? `<br><img src="${s.image_url}" style="width:120px; height:120px; object-fit:contain; background:transparent; margin:4px 0; cursor:zoom-in;" onclick="openZoomModal('${encodeURIComponent(s.image_url)}', 'image')"><br>` : match;
+          });
+      }
       inner=`<span style="white-space:pre-wrap">${safeTxt}</span>`;
   }
+
 
 
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
@@ -2381,14 +2393,27 @@ function toggleExpandPanel() {
   }
 }
 // 👉 全屏放大查看图片或画作
-function openZoomModal(contentHtml) {
+// 👉 全屏放大查看图片或画作 (高级白板画框版)
+function openZoomModal(encodedData, type) {
+  let contentHtml = '';
+  const data = decodeURIComponent(encodedData);
+  
+  if (type === 'image') {
+     contentHtml = `<img src="${data}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,0.5);">`;
+  } else if (type === 'svg') {
+     // 👈 核心修复：如果是 AI 画的画，给它套一个白色的、超大的专属正方形画框！
+     const fixedSvg = data.replace(/<svg/i, '<svg style="width:100%;height:100%;"');
+     contentHtml = `<div style="width:90vw; height:90vw; max-width:500px; max-height:500px; background:#fff; padding:20px; border-radius:16px; display:flex; align-items:center; justify-content:center; box-shadow:0 10px 40px rgba(0,0,0,0.6);">${fixedSvg}</div>`;
+  }
+
   const div = document.createElement('div');
-  div.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(5px);';
+  div.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(8px);';
   div.innerHTML = `
-    <div style="position:relative;max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center;">
+    <div style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
        ${contentHtml}
     </div>
-    <button style="position:absolute;top:30px;right:30px;background:rgba(255,255,255,0.2);border:none;color:#fff;font-size:24px;width:40px;height:40px;border-radius:50%;cursor:pointer;" onclick="this.parentElement.remove()">✕</button>
+    <button style="position:absolute;top:30px;right:30px;background:rgba(255,255,255,0.2);border:none;color:#fff;font-size:24px;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.4)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'" onclick="this.parentElement.remove()">✕</button>
   `;
   document.body.appendChild(div);
 }
+
