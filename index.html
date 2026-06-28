@@ -76,19 +76,43 @@
      <div id="stickerPicker" style="display:none; position:absolute; bottom:100%; left:10px; right:10px; background:var(--s2); border:1px solid var(--bd); border-radius:12px; padding:10px; margin-bottom:10px; max-height:200px; overflow-y:auto; box-shadow:0 -4px 20px rgba(0,0,0,0.5); z-index:100;">
        <div id="stickerGrid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(60px, 1fr)); gap:10px;"></div>
     </div>
-    <div class="input-bar" style="position:relative">
+    <!-- 👇 新增的微信级折叠面板 (默认隐藏) -->
+    <div id="expandPanel" style="display:none; background:var(--s1); border-top:1px solid var(--bd); padding:20px; padding-bottom:max(20px, env(safe-area-inset-bottom)); flex-shrink:0;">
+       <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:15px;">
+           <div onclick="document.getElementById('fileInput').click(); toggleExpandPanel();" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
+               <div style="width:54px;height:54px;border-radius:16px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:24px;border:1px solid var(--bd);margin-bottom:8px;transition:0.1s;" onmousedown="this.style.background='var(--bd)'" onmouseup="this.style.background='var(--s2)'">🖼️</div>
+               <span style="font-size:11px;color:var(--td)">发相册</span>
+           </div>
+           <div onclick="toggleStickerPicker(); toggleExpandPanel();" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
+               <div style="width:54px;height:54px;border-radius:16px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:24px;border:1px solid var(--bd);margin-bottom:8px;transition:0.1s;" onmousedown="this.style.background='var(--bd)'" onmouseup="this.style.background='var(--s2)'">🤡</div>
+               <span style="font-size:11px;color:var(--td)">表情包</span>
+           </div>
+           <div onclick="openMusicSearch(); toggleExpandPanel();" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
+               <div style="width:54px;height:54px;border-radius:16px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:24px;border:1px solid var(--bd);margin-bottom:8px;transition:0.1s;" onmousedown="this.style.background='var(--bd)'" onmouseup="this.style.background='var(--s2)'">🎵</div>
+               <span style="font-size:11px;color:var(--td)">一起听</span>
+           </div>
+           <div onclick="openDrawingBoard(); toggleExpandPanel();" style="display:flex;flex-direction:column;align-items:center;cursor:pointer;">
+               <div style="width:54px;height:54px;border-radius:16px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:24px;border:1px solid var(--bd);margin-bottom:8px;transition:0.1s;" onmousedown="this.style.background='var(--bd)'" onmouseup="this.style.background='var(--s2)'">🖌️</div>
+               <span style="font-size:11px;color:var(--td)">你画我猜</span>
+           </div>
+       </div>
+    </div>
 
+    <!-- 👇 极简回归的输入栏 -->
+    <div class="input-bar" style="position:relative">
       <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="sendImage(event)">
-      <button class="ic-btn normal" onclick="document.getElementById('fileInput').click()" title="发图片">📎</button>
-      <button class="ic-btn normal" onclick="openMusicSearch()" title="一起听">🎵</button>
-      <button class="ic-btn normal" onclick="openDrawingBoard()" title="你画我猜">🖌️</button>
-      <button class="ic-btn normal" id="btnSticker" onclick="toggleStickerPicker()" title="发表情">🙂</button>
+      
+      <!-- 魔法加号按钮 -->
+      <button class="ic-btn normal" id="btnExpand" onclick="toggleExpandPanel()" title="更多功能" style="font-size:18px;">⊕</button>
+      
       <button class="ic-btn normal" id="voiceRecBtn" onclick="toggleVoiceRec()" title="按住录音">🎙</button>
-      <textarea class="ta" id="msgInput" placeholder="回车暂存，发送键发出…" rows="1"
-        oninput="onInput(this)" onkeydown="handleKey(event)"></textarea>
+      
+      <!-- 点击输入框自动收起面板 -->
+      <textarea class="ta" id="msgInput" placeholder="回车暂存，发送键发出…" rows="1" oninput="onInput(this)" onkeydown="handleKey(event)" onfocus="if(document.getElementById('expandPanel').style.display==='block') toggleExpandPanel()"></textarea>
       
       <button class="send-btn off" id="sendBtn" onclick="send()">↑</button>
     </div>
+
   </div>
 </div>
 
