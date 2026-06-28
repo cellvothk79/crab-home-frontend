@@ -1071,6 +1071,7 @@ function renderPanel(name){
   else if(name==='calls'){if(typeof renderCallsPanel === 'function') renderCallsPanel(); else el.innerHTML='通话模块未加载';}
   else if(name==='settings')el.innerHTML=renderSettingsPanel();
   else if(name==='desire'){renderDesirePanel();} 
+  else if(name==='media'){renderMediaPanel();} 
 }
 
 async function renderDesirePanel() {
@@ -1321,6 +1322,11 @@ function showMemTrash(){
   el.innerHTML='<p style="color:var(--tf);font-size:11px;margin-bottom:8px">回收站中的记忆不会被AI读取，可恢复或永久删除</p>';
   fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/trash').then(r=>r.json()).then(data=>{
     if(!data.length){el.innerHTML+='<p style="color:var(--tf);font-size:12px;text-align:center;padding:10px">回收站是空的</p>';return;}
+    
+    // 👇 核心修复：加了一个霸气的红色“一键清空”按钮！
+    const idsString = JSON.stringify(data.map(m=>m.id));
+    el.innerHTML+=`<button onclick='emptyMemTrash(${idsString})' style="width:100%;margin-bottom:10px;padding:8px;background:rgba(200,80,80,.1);border:1px solid rgba(200,80,80,.2);border-radius:8px;color:#c46;font-size:12px;cursor:pointer">💥 一键清空所有回收站</button>`;
+    
     el.innerHTML+=data.map(m=>`
       <div style="background:var(--s2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin-bottom:6px;opacity:.7">
         <div style="font-size:12.5px;margin-bottom:5px">${esc(m.summary)}</div>
@@ -1331,6 +1337,16 @@ function showMemTrash(){
       </div>`).join('');
   }).catch(()=>{});
 }
+
+// 配合上面按钮的清空函数
+async function emptyMemTrash(ids) {
+    if(!confirm('确定要彻底清空回收站吗？此操作不可恢复！')) return;
+    const el=document.getElementById('memList');
+    el.innerHTML = '<div style="color:var(--td);text-align:center;padding:20px">正在清空...</div>';
+    await Promise.all(ids.map(id => fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/permanent', {method:'DELETE'}).catch(()=>{})));
+    showMemTrash();
+}
+
 function restoreMem(id){
   if(!cfg.base)return;
   fetch(cfg.base.replace(/\/+$/,'')+'/api/memories/'+id+'/restore',{method:'POST'}).then(()=>showMemTrash()).catch(e=>alert(e.message));
@@ -1499,3 +1515,263 @@ function delAnniv(i){annivs.splice(i,1);save(K.annivs,annivs);renderPanel('setti
 
 // ═══════════ UTILS ═══════════
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+// ═══════════════════════════════════════
+//  书影音专属放映室/游戏房 (草稿+大模型打分)
+// ═══════════════════════════════════════
+
+let allMedia = [];
+let mediaType = 'movie'; 
+let mediaStatus = 'draft'; 
+
+function renderMediaPanel() {
+  const el = document.getElementById('panelContent');
+  el.innerHTML = `
+  <div class="panel-hdr"><span class="panel-title">🍿 我们的放映室/游戏房</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+  
+  <div class="media-tabs">
+    <div class="media-tab active" id="tab_movie" onclick="switchMediaType('movie')">🎬 电影/剧集</div>
+    <div class="media-tab" id="tab_game" onclick="switchMediaType('game')">🎮 游戏</div>
+  </div>
+  
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+     <div style="display:flex; gap:10px;">
+        <button class="h-btn" id="btn_draft" style="color:var(--ac); border-color:var(--ac)" onclick="switchMediaStatus('draft')">🔥 进度草稿</button>
+        <button class="h-btn" id="btn_completed" onclick="switchMediaStatus('completed')">✅ 已完结</button>
+     </div>
+     <button class="h-btn" style="background:var(--ac); color:#0c0b0e; border:none;" onclick="showAddMedia()">+ 新增记录</button>
+  </div>
+  
+  <div id="mediaGrid" class="media-grid"><div style="color:var(--tf);font-size:12px;padding:20px">加载中...</div></div>`;
+  loadMediaRecords();
+}
+
+function switchMediaType(type) {
+  mediaType = type;
+  document.getElementById('tab_movie').className = 'media-tab' + (type==='movie'?' active':'');
+  document.getElementById('tab_game').className = 'media-tab' + (type==='game'?' active':'');
+  renderMediaGrid();
+}
+
+function switchMediaStatus(status) {
+  mediaStatus = status;
+  document.getElementById('btn_draft').style = status==='draft' ? 'color:var(--ac); border-color:var(--ac)' : '';
+  document.getElementById('btn_completed').style = status==='completed' ? 'color:var(--ac); border-color:var(--ac)' : '';
+  renderMediaGrid();
+}
+
+async function loadMediaRecords() {
+  if(!cfg.base || !currentSession) return;
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + currentSession.id);
+    allMedia = await r.json();
+    renderMediaGrid();
+  } catch(e) {
+    document.getElementById('mediaGrid').innerHTML = '加载失败';
+  }
+}
+
+function renderMediaGrid() {
+  const grid = document.getElementById('mediaGrid');
+  const filtered = allMedia.filter(m => m.media_type === mediaType && m.status === mediaStatus);
+  
+  if (filtered.length === 0) {
+    grid.innerHTML = `<div style="grid-column: 1 / -1; text-align:center; color:var(--tf); font-size:12px; padding:30px 0;">还没有记录哦，快去建一个吧！</div>`;
+    return;
+  }
+  
+  grid.innerHTML = filtered.map(m => `
+    <div class="media-card" onclick="showMediaDetail('${m.id}')">
+       <div class="media-badge">${mediaStatus === 'draft' ? '草稿' : '完结'}</div>
+       <img class="media-cover" src="${m.cover_url || ''}" alt="封面图" onerror="this.outerHTML='<div class=\\'media-cover\\'>没有封面</div>'">
+       <div class="media-info">
+          <div class="media-title">${esc(m.title)}</div>
+          <div class="media-score">${mediaStatus === 'completed' ? '⭐'.repeat(m.user_score||0) : (m.time_segments?.length || 0) + ' 段记忆'}</div>
+       </div>
+    </div>
+  `).join('');
+}
+
+// 👉 新增弹窗
+function showAddMedia() {
+  const el = document.getElementById('panelContent');
+  el.innerHTML = `
+  <div class="panel-hdr"><span class="panel-title">新建进度草稿</span><button class="h-btn" onclick="renderMediaPanel()">取消</button></div>
+  <label class="p-label">类别</label>
+  <select id="mType" class="p-inp"><option value="movie" ${mediaType==='movie'?'selected':''}>🎬 电影/剧集</option><option value="game" ${mediaType==='game'?'selected':''}>🎮 游戏</option></select>
+  <label class="p-label">名字</label>
+  <input class="p-inp" id="mTitle" placeholder="例如：黑神话悟空">
+  <label class="p-label">封面图片地址 (可选)</label>
+  <input class="p-inp" id="mCover" placeholder="直接粘贴网络图片网址...">
+  
+  <div style="font-size:11px; color:var(--tf); margin-top:10px; margin-bottom:20px;">
+    建好草稿后，你就可以随时把你们的讨论时间段塞进去了。等彻底看完/玩完，再一键让大模型生成回忆！
+  </div>
+  <button class="p-btn save" onclick="saveNewMedia()">保存草稿</button>`;
+}
+
+async function saveNewMedia() {
+  const type = document.getElementById('mType').value;
+  const title = document.getElementById('mTitle').value.trim();
+  const cover = document.getElementById('mCover').value.trim();
+  if(!title) return alert('起个名字吧！');
+  
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ session_id: currentSession.id, media_type: type, title, cover_url: cover })
+    });
+    const d = await r.json();
+    allMedia.unshift(d);
+    renderMediaPanel();
+  } catch(e) { alert('保存失败'); }
+}
+
+// 👉 详情弹窗 (草稿编辑 vs 完结展示)
+function showMediaDetail(id) {
+  const m = allMedia.find(x => x.id === id);
+  if(!m) return;
+  const el = document.getElementById('panelContent');
+
+  if (m.status === 'draft') {
+    // 【草稿模式】：填时间段、填分数、准备生成！
+    const segHtml = (m.time_segments || []).map((seg, i) => `
+      <div class="time-seg">
+         <span style="color:var(--td);font-size:11px">段落${i+1}</span>
+         <input type="text" id="ts_start_${i}" value="${seg.start}" placeholder="2026-06-28 14:00">
+         <span style="color:var(--td)">-</span>
+         <input type="text" id="ts_end_${i}" value="${seg.end}" placeholder="2026-06-28 16:00">
+      </div>
+    `).join('');
+
+    el.innerHTML = `
+    <div class="panel-hdr"><span class="panel-title">✏️ 维护进度：${esc(m.title)}</span><button class="h-btn" onclick="renderMediaPanel()">返回</button></div>
+    
+    <label class="p-label">你的最终打分 (1-5)</label>
+    <input type="number" class="p-inp" id="mScore" value="${m.user_score||5}" min="1" max="5">
+    
+    <label class="p-label" style="margin-top:10px">截取陪伴记忆 (填入你们讨论这件作品的时间)</label>
+    <div style="font-size:10px; color:var(--tf); margin-bottom:8px">格式：YYYY-MM-DD HH:MM</div>
+    <div id="segContainer">${segHtml}</div>
+    <button class="h-btn" style="width:100%; margin-bottom:20px; border-style:dashed;" onclick="addSegUI()">+ 增加一个时间段</button>
+    
+    <div style="background:rgba(200,80,80,0.1); border:1px solid rgba(200,80,80,0.3); border-radius:8px; padding:10px; margin-bottom:15px; text-align:center;">
+       <div style="color:#c46; font-size:11px; font-weight:bold; margin-bottom:4px">⚠️ 完结警告</div>
+       <div style="color:var(--td); font-size:10px">点击下方按钮，将把截取的时间段发给大模型（Claude）撰写陪伴回忆。请确保后端 API 为按次计费模型以免破产！</div>
+    </div>
+    
+    <button class="p-btn save" id="genBtn" onclick="generateMediaReview('${m.id}')">🎉 完结撒花！召唤大模型生成回忆</button>
+    <button class="h-btn" style="width:100%; margin-top:10px; color:#c46; border-color:rgba(200,80,80,0.3);" onclick="delMedia('${m.id}')">删除此草稿</button>
+    `;
+  } else {
+    // 【已完结模式】：展示海报、双人评分和纯净聊天记录
+    let chatLogHtml = '';
+    if (m.pure_chat_history && m.pure_chat_history.length > 0) {
+      chatLogHtml = m.pure_chat_history.map(c => `
+         <div style="margin-bottom:6px;">
+            <span style="color:${c.role==='user'?'var(--t)':'var(--ac)'}; font-size:10px;">${c.role==='user'?'👩 你':'🦀 蟹'} (${fmtTime(c.created_at)})：</span>
+            <span style="font-size:11px; color:var(--td); line-height:1.4">${esc(c.content)}</span>
+         </div>
+      `).join('');
+    }
+
+    el.innerHTML = `
+    <div class="panel-hdr"><span class="panel-title">${esc(m.title)}</span><button class="h-btn" onclick="renderMediaPanel()">返回</button></div>
+    
+    <div style="display:flex; gap:12px; margin-bottom:15px">
+       <img src="${m.cover_url || ''}" style="width:90px; height:120px; object-fit:cover; border-radius:6px; border:1px solid var(--bd);">
+       <div style="flex:1;">
+          <div style="font-size:14px; font-weight:bold; color:var(--t); margin-bottom:8px">评分簿</div>
+          <div style="font-size:12px; color:var(--td); margin-bottom:4px">👩 你的打分：<span style="color:var(--ac)">${'⭐'.repeat(m.user_score||0)}</span></div>
+          <div style="font-size:12px; color:var(--td)">🦀 他的打分：<span style="color:var(--ac)">${'⭐'.repeat(m.ai_score||0)}</span></div>
+       </div>
+    </div>
+
+    <div style="background:var(--s2); border:1px solid rgba(212,165,116,0.2); border-radius:8px; padding:10px; margin-bottom:12px;">
+       <div style="font-size:11px; color:var(--ac); margin-bottom:4px">👩 你的观后感 (他帮你总结的)：</div>
+       <div style="font-size:12px; color:var(--t); line-height:1.6">${esc(m.user_review || '无')}</div>
+    </div>
+
+    <div style="background:rgba(212,165,116,0.05); border:1px solid rgba(212,165,116,0.3); border-radius:8px; padding:10px; margin-bottom:15px;">
+       <div style="font-size:11px; color:var(--ac); margin-bottom:4px">🦀 他的锐评：</div>
+       <div style="font-size:12px; color:var(--t); line-height:1.6">${esc(m.ai_review || '无')}</div>
+    </div>
+    
+    <div style="border-top:1px dashed var(--bd); padding-top:12px; margin-bottom:10px;">
+       <div style="font-size:12px; font-weight:bold; margin-bottom:8px">📁 冻结的时光记录</div>
+       <div style="max-height:200px; overflow-y:auto; background:#111; padding:8px; border-radius:6px; border:1px solid #000;">
+          ${chatLogHtml || '<div style="color:var(--tf);font-size:10px;text-align:center">没有找到聊天记录</div>'}
+       </div>
+    </div>
+    
+    <button class="h-btn" style="width:100%; color:#c46; border-color:rgba(200,80,80,0.3);" onclick="delMedia('${m.id}')">永久删除此记忆</button>
+    `;
+  }
+}
+
+function addSegUI() {
+  const container = document.getElementById('segContainer');
+  const count = container.children.length;
+  const div = document.createElement('div');
+  div.className = 'time-seg';
+  div.innerHTML = `
+     <span style="color:var(--td);font-size:11px">段落${count+1}</span>
+     <input type="text" id="ts_start_${count}" placeholder="格式: YYYY-MM-DD HH:MM">
+     <span style="color:var(--td)">-</span>
+     <input type="text" id="ts_end_${count}" placeholder="格式: YYYY-MM-DD HH:MM">
+  `;
+  container.appendChild(div);
+}
+
+async function generateMediaReview(id) {
+  const btn = document.getElementById('genBtn');
+  const score = document.getElementById('mScore').value;
+  const container = document.getElementById('segContainer');
+  let segments = [];
+  
+  for(let i=0; i<container.children.length; i++) {
+     const st = document.getElementById('ts_start_'+i).value.trim();
+     const ed = document.getElementById('ts_end_'+i).value.trim();
+     if(st && ed) segments.push({ start: st, end: ed });
+  }
+  if(segments.length === 0) return alert('请至少填写一个讨论时间段！');
+
+  btn.textContent = '⏳ 正在调取大模型回忆中，请耐心等待...';
+  btn.disabled = true;
+
+  try {
+    // 1. 先保存填写的状态
+    await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + id, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ user_score: score, time_segments: segments })
+    });
+
+    // 2. 发起大模型总结请求
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + id + '/generate', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ api_key: cfg.apiKey, api_base: cfg.apiBase, model: cfg.model })
+    });
+    
+    if(!r.ok) {
+        const err = await r.json().catch(()=>({}));
+        throw new Error(err.error || '生成失败');
+    }
+    
+    // 成功！刷新面板
+    await loadMediaRecords();
+    showMediaDetail(id);
+    
+  } catch(e) {
+    alert(e.message);
+    btn.textContent = '🎉 完结撒花！召唤大模型生成回忆';
+    btn.disabled = false;
+  }
+}
+
+async function delMedia(id) {
+  if(!confirm('确定要删除吗？不可恢复！')) return;
+  try {
+    await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + id, { method: 'DELETE' });
+    allMedia = allMedia.filter(m => m.id !== id);
+    renderMediaPanel();
+  } catch(e) {}
+}
