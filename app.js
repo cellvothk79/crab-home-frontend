@@ -2259,3 +2259,67 @@ function sendDrawing() {
   document.getElementById('msgInput').value = '我们在玩你画我猜！看看我画的是什么？';
   send();
 }
+
+let desireChartInstance = null;
+
+async function showDesireChart(metricKey, label, color) {
+  const el = document.getElementById('panelContent');
+  el.innerHTML = `<div class="panel-hdr"><span class="panel-title">📈 ${label} - 历史波形图</span><button class="h-btn" onclick="renderDesirePanel()">返回</button></div>
+  <div style="color:var(--td);font-size:12px;text-align:center;padding:20px">正在拉取脑电波数据...</div>`;
+  
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/desires/' + currentSession.id + '/history');
+    const historyData = await r.json();
+    
+    if (historyData.length === 0) {
+      el.innerHTML = `<div class="panel-hdr"><span class="panel-title">📈 ${label}</span><button class="h-btn" onclick="renderDesirePanel()">返回</button></div>
+      <div style="color:var(--tf);font-size:12px;text-align:center;padding:30px">还没有收集到足够的心跳历史，等他跳几下再来看吧~</div>`;
+      return;
+    }
+
+    const labels = historyData.map(d => {
+       const dt = new Date(d.created_at);
+       return `${dt.getHours().toString().padStart(2,'0')}:${dt.getMinutes().toString().padStart(2,'0')}`;
+    });
+    const dataPoints = historyData.map(d => d[metricKey] || 0);
+
+    el.innerHTML = `
+    <div class="panel-hdr"><span class="panel-title">📈 ${label} - 趋势</span><button class="h-btn" onclick="renderDesirePanel()">返回</button></div>
+    <div style="background:var(--s2); border:1px solid var(--bd); border-radius:12px; padding:10px; margin-bottom:15px;">
+       <canvas id="desireChartCanvas" width="300" height="200"></canvas>
+    </div>
+    <div style="font-size:10px; color:var(--tf); text-align:center;">显示最近几次的心跳历史波动。如果在聊天，数值会被重置。</div>`;
+
+    const ctx = document.getElementById('desireChartCanvas').getContext('2d');
+    if (desireChartInstance) desireChartInstance.destroy();
+    
+    desireChartInstance = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: label,
+          data: dataPoints,
+          borderColor: color,
+          backgroundColor: color + '33',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.4, // 平滑曲线
+          pointRadius: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { min: 0, max: 1.0, ticks: { color: '#7d7a72', font: { size: 9 } }, grid: { color: '#2a2930' } },
+          x: { ticks: { color: '#7d7a72', font: { size: 9 } }, grid: { display: false } }
+        }
+      }
+    });
+
+  } catch(e) {
+    el.innerHTML = `<div class="panel-hdr"><span class="panel-title">📈 ${label}</span><button class="h-btn" onclick="renderDesirePanel()">返回</button></div>
+    <div style="color:#c46;font-size:12px;text-align:center;padding:20px">画图失败了: ${e.message}</div>`;
+  }
+}
