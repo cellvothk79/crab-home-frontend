@@ -46,6 +46,7 @@ let editingId=null;
 let selMode=false;
 let selected=new Set();
 let modelList=[];
+let sysStickers = [];
 let recTimer=null;
 let nowTimer=null;
 
@@ -55,6 +56,7 @@ let nowTimer=null;
   updateNow();
   nowTimer=setInterval(updateNow,30000);
   initSingleSession();
+  loadStickers();
   checkAnnivs();
   setTimeout(refreshHeaderMood, 500);
 
@@ -330,8 +332,19 @@ function renderMsg(m){
   const quoteText=m.quoteContent||(m.quote?.content)||'';
   if(quoteText)q=`<div class="quote-preview"><span style="opacity:.6">引用: </span>${esc(quoteText.slice(0,55))}${quoteText.length>55?'...':''}</div>`;
   let inner='';
-  if(m.type==='image')inner=`<img src="${m.imageUrl}" alt="图片">`;
-  else inner=`<span style="white-space:pre-wrap">${esc(m.content)}</span>`;
+  if(m.type==='image') inner=`<img src="${m.imageUrl}" alt="图片">`;
+  else {
+    // 👇 魔法解析器：把 [sticker:xxx] 变成真实的图片！
+        // 👉 核心黑科技：保留 SVG 标签，让他画的画能显示出来！
+    let safeTxt = m.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    safeTxt = safeTxt.replace(/&lt;svg([\s\S]*?)&lt;\/svg&gt;/gi, '<svg$1</svg>'); // 把转义的 SVG 还原回去
+
+    safeTxt = safeTxt.replace(/\[sticker:([a-zA-Z0-9_]+)\]/g, (match, sid) => {
+        const s = sysStickers.find(x => x.sticker_id === sid);
+        return s ? `<br><img src="${s.image_url}" style="width:120px; height:120px; object-fit:contain; background:transparent; margin:4px 0;"><br>` : match;
+    });
+    inner=`<span style="white-space:pre-wrap">${safeTxt}</span>`;
+  }
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
   const ttsBtn=(!isU&&cfg.base)?`<button onclick="playTTS(event,'${m.id}')" style="background:none;border:none;color:var(--td);font-size:12px;cursor:pointer;padding:2px 4px;opacity:.6" title="听语音">🔊</button>`:'';
 
@@ -2036,3 +2049,199 @@ async function showChatContext(msgId) {
   } catch(e) { document.getElementById('contextBox').innerHTML = '加载上下文失败'; }
 }
 
+// ═══════════════════════════════════════
+//  表情包系统 (Sticker System)
+// ═══════════════════════════════════════
+async function loadStickers() {
+  if(!cfg.base) return;
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/stickers');
+    sysStickers = await r.json();
+  } catch(e){}
+}
+
+function toggleStickerPicker() {
+  const p = document.getElementById('stickerPicker');
+  const btn = document.getElementById('btnSticker');
+  if (p.style.display === 'none') {
+    p.style.display = 'block';
+    btn.className = 'ic-btn active';
+    if(sysStickers.length === 0) {
+      document.getElementById('stickerGrid').innerHTML = '<div style="grid-column:1/-1; color:var(--td); font-size:11px; text-align:center;">还没添加表情包，去侧边栏加几个吧</div>';
+    } else {
+      document.getElementById('stickerGrid').innerHTML = sysStickers.map(s => `
+        <img src="${s.image_url}" title="${esc(s.desc)}" onclick="sendSticker('${s.sticker_id}')" style="width:60px; height:60px; object-fit:contain; cursor:pointer; transition:transform 0.1s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+      `).join('');
+    }
+  } else {
+    p.style.display = 'none';
+    btn.className = 'ic-btn normal';
+  }
+}
+
+function sendSticker(sid) {
+  document.getElementById('stickerPicker').style.display = 'none';
+  document.getElementById('btnSticker').className = 'ic-btn normal';
+  stageMessage(`[sticker:${sid}]`);
+  send(); // 选完直接发送
+}
+
+// 👉 侧边栏的【表情包管理面板】
+function renderStickerPanel() {
+  const el = document.getElementById('panelContent');
+  let html = `<div class="panel-hdr"><span class="panel-title">🤡 表情包仓库</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+    <div style="background:var(--s2); border:1px solid var(--bd); border-radius:8px; padding:10px; margin-bottom:15px;">
+       <label class="p-label">1. 上传表情图 (推荐透明背景)</label>
+       <input type="file" id="stkFile" accept="image/*" class="p-inp" style="padding:4px">
+       <label class="p-label">2. 英文短码 (例如: hug_heart)</label>
+       <input type="text" id="stkId" class="p-inp" placeholder="纯英文加下划线">
+       <label class="p-label">3. 中文描述 (写给AI看的，决定他什么时候发)</label>
+       <input type="text" id="stkDesc" class="p-inp" placeholder="例如: 想要抱抱，表达撒娇">
+       <button class="p-btn save" id="stkSaveBtn" onclick="uploadNewSticker()">⬆️ 上传表情</button>
+    </div>
+    <div style="font-size:12px; font-weight:bold; margin-bottom:10px;">已有表情 (${sysStickers.length})</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+  `;
+  
+  html += sysStickers.map(s => `
+    <div style="background:var(--bg); border:1px solid var(--bd); border-radius:6px; padding:8px; display:flex; align-items:center; gap:8px;">
+       <img src="${s.image_url}" style="width:40px; height:40px; object-fit:contain;">
+       <div style="flex:1; overflow:hidden;">
+          <div style="font-size:11px; color:var(--ac); font-weight:bold;">${s.sticker_id}</div>
+          <div style="font-size:9px; color:var(--td); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${esc(s.desc)}">${esc(s.desc)}</div>
+       </div>
+       <button style="background:none; border:none; color:#c46; cursor:pointer; font-size:14px;" onclick="delSticker('${s.id}')">🗑</button>
+    </div>
+  `).join('');
+  html += `</div>`;
+  el.innerHTML = html;
+}
+
+// 记得在 renderPanel(name) 里加一行：else if(name==='stickerMgr'){renderStickerPanel();}
+
+async function uploadNewSticker() {
+  const file = document.getElementById('stkFile').files[0];
+  const sid = document.getElementById('stkId').value.trim();
+  const desc = document.getElementById('stkDesc').value.trim();
+  if(!file || !sid || !desc) return alert('图片、短码和描述都必填哦！');
+  if(!/^[a-zA-Z0-9_]+$/.test(sid)) return alert('英文短码只能包含字母、数字和下划线！');
+  
+  const btn = document.getElementById('stkSaveBtn');
+  btn.textContent = '上传中...'; btn.disabled = true;
+  
+  const fd = new FormData();
+  fd.append('file', file); fd.append('sticker_id', sid); fd.append('desc', desc);
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/stickers', { method: 'POST', body: fd });
+    const d = await r.json();
+    if(d.ok) { await loadStickers(); renderStickerPanel(); } else alert(d.error);
+  } catch(e) { alert('上传失败'); }
+  btn.textContent = '⬆️ 上传表情'; btn.disabled = false;
+}
+
+async function delSticker(id) {
+  if(!confirm('删掉这个表情？')) return;
+  try {
+    await fetch(cfg.base.replace(/\/+$/, '') + '/api/stickers/' + id, { method: 'DELETE' });
+    await loadStickers(); renderStickerPanel();
+  } catch(e){}
+}
+// ═══════════════════════════════════════
+//  一起听 & 你画我猜 系统
+// ═══════════════════════════════════════
+
+// --- 音乐模块 ---
+let globalMusic = new Audio();
+async function openMusicSearch() {
+  const q = prompt('想和他一起听什么歌？(输入歌名或歌手)');
+  if(!q) return;
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/music/search?q=' + encodeURIComponent(q));
+    const d = await r.json();
+    if(d.name) {
+      document.getElementById('mTrackName').textContent = d.name;
+      document.getElementById('mArtistName').textContent = d.artist;
+      document.getElementById('vinylCover').src = d.cover;
+      document.getElementById('musicWidget').classList.add('show');
+      
+      // 发送隐蔽提示给 AI
+      stageMessage(`[系统提示：peri 刚刚在放映室点播了 ${d.name} - ${d.artist}，这首歌正在播放，请结合氛围跟我聊天]`);
+      send();
+
+      // 如果有试听链接，就播出来
+      if(d.preview) {
+        globalMusic.src = d.preview;
+        globalMusic.play();
+        document.getElementById('vinylRecord').classList.add('playing');
+        globalMusic.onended = () => {
+           document.getElementById('vinylRecord').classList.remove('playing');
+        };
+      } else {
+        // 纯展示封面（VIP逻辑），让唱片悄悄转
+        document.getElementById('vinylRecord').classList.add('playing');
+      }
+    } else { alert('没搜到这首歌呀~'); }
+  } catch(e) { alert('搜歌失败'); }
+}
+function closeMusic() {
+  document.getElementById('musicWidget').classList.remove('show');
+  globalMusic.pause(); document.getElementById('vinylRecord').classList.remove('playing');
+}
+
+// --- 画板模块 ---
+let ctx, isDrawing = false;
+let brushColor = '#000', brushWidth = 3;
+
+function initCanvas() {
+  const canvas = document.getElementById('dCanvas');
+  ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+  const startDraw = (e) => {
+    isDrawing = true;
+    const pos = getPos(e);
+    ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
+  };
+  const draw = (e) => {
+    if(!isDrawing) return;
+    e.preventDefault(); // 防页面滚动
+    const pos = getPos(e);
+    ctx.strokeStyle = brushColor; ctx.lineWidth = document.getElementById('brushSize').value;
+    ctx.lineTo(pos.x, pos.y); ctx.stroke();
+  };
+  const stopDraw = () => { isDrawing = false; ctx.closePath(); };
+  const getPos = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const evt = e.touches ? e.touches[0] : e;
+    return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+  };
+
+  canvas.addEventListener('mousedown', startDraw); canvas.addEventListener('mousemove', draw);
+  canvas.addEventListener('mouseup', stopDraw); canvas.addEventListener('mouseout', stopDraw);
+  canvas.addEventListener('touchstart', startDraw, {passive:false}); canvas.addEventListener('touchmove', draw, {passive:false});
+  canvas.addEventListener('touchend', stopDraw);
+}
+
+function openDrawingBoard() {
+  document.getElementById('drawingBoard').style.display = 'flex';
+  if(!ctx) initCanvas(); else clearCanvas();
+}
+function setBrush(color, el) {
+  brushColor = color;
+  document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+}
+function clearCanvas() {
+  if(ctx) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 320, 400); }
+}
+function sendDrawing() {
+  const canvas = document.getElementById('dCanvas');
+  const b64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+  const m = {id:Date.now().toString(), role:'user', content:'猜猜我画的是什么？', ts:new Date().toISOString(), type:'image', imageUrl:canvas.toDataURL('image/jpeg'), imageBase64:b64, imageMime:'image/jpeg'};
+  messages.push(m); saveMessages(); renderMessages();
+  document.getElementById('drawingBoard').style.display = 'none';
+  // 伪造发送动作
+  document.getElementById('msgInput').value = '我们在玩你画我猜！看看我画的是什么？';
+  send();
+}
