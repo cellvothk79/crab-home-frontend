@@ -1544,23 +1544,29 @@ function delAnniv(i){annivs.splice(i,1);save(K.annivs,annivs);renderPanel('setti
 // ═══════════ UTILS ═══════════
 function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 // ═══════════════════════════════════════
-//  书影音专属放映室/游戏房 (草稿+大模型打分)
+//  书影音专属放映室/游戏房 (全功能整合版)
 // ═══════════════════════════════════════
 
 let allMedia = [];
 let mediaType = 'movie'; 
 let mediaStatus = 'draft'; 
 
+// 格式化本地时间工具
+const formatLocal = (iso) => {
+    if(!iso) return '';
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 function renderMediaPanel() {
   const el = document.getElementById('panelContent');
   el.innerHTML = `
   <div class="panel-hdr"><span class="panel-title">🍿 我们的放映室/游戏房</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
-  
   <div class="media-tabs">
     <div class="media-tab active" id="tab_movie" onclick="switchMediaType('movie')">🎬 电影/剧集</div>
     <div class="media-tab" id="tab_game" onclick="switchMediaType('game')">🎮 游戏</div>
   </div>
-  
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
      <div style="display:flex; gap:10px;">
         <button class="h-btn" id="btn_draft" style="color:var(--ac); border-color:var(--ac)" onclick="switchMediaStatus('draft')">🔥 进度草稿</button>
@@ -1568,7 +1574,6 @@ function renderMediaPanel() {
      </div>
      <button class="h-btn" style="background:var(--ac); color:#0c0b0e; border:none;" onclick="showAddMedia()">+ 新增记录</button>
   </div>
-  
   <div id="mediaGrid" class="media-grid"><div style="color:var(--tf);font-size:12px;padding:20px">加载中...</div></div>`;
   loadMediaRecords();
 }
@@ -1601,26 +1606,23 @@ async function loadMediaRecords() {
 function renderMediaGrid() {
   const grid = document.getElementById('mediaGrid');
   const filtered = allMedia.filter(m => m.media_type === mediaType && m.status === mediaStatus);
-  
   if (filtered.length === 0) {
     grid.innerHTML = `<div style="grid-column: 1 / -1; text-align:center; color:var(--tf); font-size:12px; padding:30px 0;">还没有记录哦，快去建一个吧！</div>`;
     return;
   }
-  
   grid.innerHTML = filtered.map(m => `
     <div class="media-card" onclick="showMediaDetail('${m.id}')">
        <div class="media-badge">${mediaStatus === 'draft' ? '草稿' : '完结'}</div>
        <img class="media-cover" src="${m.cover_url || ''}" alt="封面图" onerror="this.outerHTML='<div class=\\'media-cover\\'>没有封面</div>'">
        <div class="media-info">
           <div class="media-title">${esc(m.title)}</div>
-          <div class="media-score">${mediaStatus === 'completed' ? '⭐'.repeat(m.user_score||0) : (m.time_segments?.length || 0) + ' 段记忆'}</div>
+          <div class="media-score" style="font-size:10px; color:var(--td); margin-top:2px;">${mediaStatus === 'completed' ? '⭐'.repeat(m.user_score||0) : (m.time_segments?.length || 0) + ' 段记忆'}</div>
        </div>
     </div>
   `).join('');
 }
 
-// 👉 新增弹窗
-// 👉 带有自动搜图功能的弹窗
+// ----------------- 新增 & 上传功能 -----------------
 function showAddMedia() {
   const el = document.getElementById('panelContent');
   el.innerHTML = `
@@ -1631,82 +1633,104 @@ function showAddMedia() {
   <label class="p-label">名字</label>
   <input class="p-inp" id="mTitle" placeholder="例如：星际穿越">
   
-  <label class="p-label">封面图片地址</label>
+  <label class="p-label">封面图片地址 (可选)</label>
   <div style="display:flex; gap:5px; margin-bottom:8px;">
-    <input class="p-inp" id="mCover" style="margin-bottom:0;flex:1" placeholder="点击右侧自动搜图，或手动粘贴">
-    <button class="h-btn" onclick="autoSearchCover()" id="btnSearchCover" style="color:var(--ac); border-color:var(--ac)">🔍 自动搜图</button>
+    <input type="file" id="mCoverFile" accept="image/*" style="display:none" onchange="uploadMediaCover(event)">
+    <input class="p-inp" id="mCover" style="margin-bottom:0;flex:1" placeholder="点击自动搜图，或本地上传">
+    <button class="h-btn" onclick="autoSearchCover()" id="btnSearchCover" style="color:var(--ac); border-color:var(--ac)">🔍 搜图</button>
+    <button class="h-btn" onclick="document.getElementById('mCoverFile').click()" id="btnUploadCover" style="color:var(--t); border-color:var(--bd)">📁 上传</button>
   </div>
   
   <div id="coverPreview" style="text-align:center; margin-bottom:10px; min-height:10px;"></div>
-  
-  <div style="font-size:11px; color:var(--tf); margin-top:10px; margin-bottom:20px;">
-    建好草稿后，你就可以随时把你们的讨论时间段塞进去了。等彻底看完/玩完，再一键让大模型生成回忆！
-  </div>
+  <div style="font-size:11px; color:var(--tf); margin-top:10px; margin-bottom:20px;">建好草稿后，你就可以随时把你们的讨论时间段塞进去了。等彻底看完/玩完，再一键让大模型生成回忆！</div>
   <button class="p-btn save" onclick="saveNewMedia()">保存草稿</button>`;
 }
 
-// 👉 呼叫后端去搜图
 async function autoSearchCover() {
   const title = document.getElementById('mTitle').value.trim();
   const type = document.getElementById('mType').value;
   if(!title) return alert('请先输入名字，我才能去搜图呀！');
-  
   const btn = document.getElementById('btnSearchCover');
   btn.textContent = '搜图中...'; btn.disabled = true;
-  
   try {
     const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/cover?title=' + encodeURIComponent(title) + '&type=' + type);
     const d = await r.json();
     if(d.url) {
       document.getElementById('mCover').value = d.url;
-      // 直接在界面上展示搜到的海报预览！
       document.getElementById('coverPreview').innerHTML = `<img src="${d.url}" style="height:140px; object-fit:cover; border-radius:6px; border:1px solid var(--ac); box-shadow:0 2px 10px rgba(0,0,0,0.3)">`;
     } else {
-      alert('没搜到合适的封面，麻烦你自己去豆瓣或者百度复制一张图片链接贴进来吧~');
+      alert('没搜到合适的封面，麻烦你自己上传或者粘贴一张图片链接吧~');
     }
-  } catch(e) {
-    alert('搜图失败啦，请手动粘贴链接');
-  }
-  btn.textContent = '🔍 自动搜图'; btn.disabled = false;
+  } catch(e) { alert('搜图失败啦，请手动上传'); }
+  btn.textContent = '🔍 搜图'; btn.disabled = false;
 }
 
-
+async function uploadMediaCover(e) {
+  const file = e.target.files[0];
+  if(!file) return;
+  const btn = document.getElementById('btnUploadCover');
+  btn.textContent = '上传中...'; btn.disabled = true;
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if(d.url) {
+       document.getElementById('mCover').value = d.url;
+       document.getElementById('coverPreview').innerHTML = `<img src="${d.url}" style="height:140px; object-fit:cover; border-radius:6px; border:1px solid var(--ac); box-shadow:0 2px 10px rgba(0,0,0,0.3)">`;
+    } else { alert('上传失败'); }
+  } catch(err) { alert('网络异常，上传失败'); }
+  btn.textContent = '📁 上传'; btn.disabled = false; e.target.value = ''; 
+}
 
 async function saveNewMedia() {
   const type = document.getElementById('mType').value;
   const title = document.getElementById('mTitle').value.trim();
   const cover = document.getElementById('mCover').value.trim();
   if(!title) return alert('起个名字吧！');
-  
   try {
     const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ session_id: currentSession.id, media_type: type, title, cover_url: cover })
     });
     const d = await r.json();
-    
-    // 👇 核心修复：如果后端报错，弹窗显示错误原因，而不是默默失败
-    if (!r.ok || d.error) {
-        alert('保存失败: ' + (d.error || '未知错误'));
-        return;
-    }
-    
+    if (!r.ok || d.error) { alert('保存失败: ' + (d.error || '未知错误')); return; }
     allMedia.unshift(d);
     renderMediaPanel();
-  } catch(e) { 
-    alert('保存异常: ' + e.message); 
-  }
+  } catch(e) { alert('保存异常: ' + e.message); }
 }
 
+// ----------------- 详情展示 & 换图功能 -----------------
+async function doUpdateMediaCover(e, id) {
+  const file = e.target.files[0];
+  if(!file) return;
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/upload', { method: 'POST', body: fd });
+    const d = await r.json();
+    if(d.url) {
+       await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + id, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ cover_url: d.url }) });
+       const idx = allMedia.findIndex(m=>m.id === id);
+       if(idx !== -1) allMedia[idx].cover_url = d.url;
+       showMediaDetail(id); 
+    }
+  } catch(err) { alert('换封面失败'); }
+}
 
-// 👉 详情弹窗 (草稿编辑 vs 完结展示)
-// 👉 格式化本地时间，供日历组件使用
-const formatLocal = (iso) => {
-    if(!iso) return '';
-    const d = new Date(iso);
-    const pad = (n) => String(n).padStart(2,'0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
+async function doAutoUpdateCover(id, title, type) {
+  const btn = document.getElementById('btnAuto_' + id);
+  if(btn) { btn.textContent = '搜图中...'; btn.disabled = true; }
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/cover?title=' + encodeURIComponent(title) + '&type=' + type);
+    const d = await r.json();
+    if(d.url) {
+       await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + id, { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ cover_url: d.url }) });
+       const idx = allMedia.findIndex(m=>m.id === id);
+       if(idx !== -1) allMedia[idx].cover_url = d.url;
+       showMediaDetail(id); 
+    } else { alert('没搜到新图片，自己上传一张吧'); }
+  } catch(err) { alert('搜图失败'); }
+  if(btn) { btn.textContent = '🔍搜图'; btn.disabled = false; }
+}
 
 function showMediaDetail(id) {
   const m = allMedia.find(x => x.id === id);
@@ -1714,7 +1738,6 @@ function showMediaDetail(id) {
   const el = document.getElementById('panelContent');
 
   if (m.status === 'draft') {
-    // 👇 核心修复1：改用 type="datetime-local"，直接弹出系统原生的小日历让你选！
     const segHtml = (m.time_segments || []).map((seg, i) => `
       <div class="time-seg" id="seg_div_${i}">
          <span style="color:var(--td);font-size:11px">段落${i+1}</span>
@@ -1727,28 +1750,38 @@ function showMediaDetail(id) {
     el.innerHTML = `
     <div class="panel-hdr"><span class="panel-title">✏️ 维护进度：${esc(m.title)}</span><button class="h-btn" onclick="renderMediaPanel()">返回</button></div>
     
+    <div style="display:flex; gap:12px; margin-bottom:15px; align-items:center; background:var(--s2); padding:10px; border-radius:8px; border:1px solid var(--bd)">
+       <img src="${m.cover_url || ''}" style="width:50px; height:70px; object-fit:cover; border-radius:4px; border:1px solid var(--bd);" onerror="this.style.display='none'">
+       <div style="display:flex; flex-direction:column; gap:6px;">
+          <span style="font-size:11px; color:var(--td)">修改封面图：</span>
+          <div style="display:flex; gap:6px;">
+            <input type="file" id="editCoverFile_${m.id}" accept="image/*" style="display:none" onchange="doUpdateMediaCover(event, '${m.id}')">
+            <button class="h-btn" onclick="document.getElementById('editCoverFile_${m.id}').click()">📁 本地上传</button>
+            <button class="h-btn" id="btnAuto_${m.id}" onclick="doAutoUpdateCover('${m.id}', '${m.title}', '${m.media_type}')">🔍 重新搜图</button>
+          </div>
+       </div>
+    </div>
+    
     <label class="p-label">目前的打分预估 (1-5，完结时才生效)</label>
     <input type="number" class="p-inp" id="mScore" value="${m.user_score||5}" min="1" max="5">
     
-    <label class="p-label" style="margin-top:10px">截取陪伴记忆 (点框框直接选时间)</label>
+    <label class="p-label" style="margin-top:10px">截取陪伴记忆 (点框框直接选日历时间)</label>
     <div id="segContainer">${segHtml}</div>
     
     <div style="display:flex; gap:10px; margin-top:8px; margin-bottom:20px;">
        <button class="h-btn" style="flex:1; border-style:dashed;" onclick="addSegUI()">+ 增加时间段</button>
-       <!-- 👇 核心修复2：加了一个显眼的暂存进度按钮！ -->
        <button class="h-btn" style="flex:1; color:var(--ac); border-color:var(--ac)" onclick="saveMediaDraft('${m.id}')">💾 保存当前进度</button>
     </div>
     
     <div style="background:rgba(200,80,80,0.1); border:1px solid rgba(200,80,80,0.3); border-radius:8px; padding:10px; margin-bottom:15px; text-align:center;">
        <div style="color:#c46; font-size:11px; font-weight:bold; margin-bottom:4px">⚠️ 完结警告</div>
-       <div style="color:var(--td); font-size:10px">点击下方按钮，将把截取的时间段发给大模型写评价。确认这段旅程结束了吗？</div>
+       <div style="color:var(--td); font-size:10px">点击下方按钮，将把截取的时间段发给大模型写评价。</div>
     </div>
     
     <button class="p-btn save" id="genBtn" onclick="generateMediaReview('${m.id}')">🎉 完结撒花！召唤大模型生成回忆</button>
     <button class="h-btn" style="width:100%; margin-top:10px; color:#c46; border-color:rgba(200,80,80,0.3);" onclick="delMedia('${m.id}')">删除此草稿</button>
     `;
   } else {
-    // 已完结界面保持不变
     let chatLogHtml = '';
     if (m.pure_chat_history && m.pure_chat_history.length > 0) {
       chatLogHtml = m.pure_chat_history.map(c => `
@@ -1763,7 +1796,14 @@ function showMediaDetail(id) {
     <div class="panel-hdr"><span class="panel-title">${esc(m.title)}</span><button class="h-btn" onclick="renderMediaPanel()">返回</button></div>
     
     <div style="display:flex; gap:12px; margin-bottom:15px">
-       <img src="${m.cover_url || ''}" style="width:90px; height:120px; object-fit:cover; border-radius:6px; border:1px solid var(--bd);">
+       <div style="display:flex; flex-direction:column; gap:5px;">
+         <img src="${m.cover_url || ''}" style="width:90px; height:120px; object-fit:cover; border-radius:6px; border:1px solid var(--bd);">
+         <div style="display:flex; gap:4px; justify-content:center">
+             <input type="file" id="editCoverFile_${m.id}" accept="image/*" style="display:none" onchange="doUpdateMediaCover(event, '${m.id}')">
+             <button class="h-btn" style="font-size:10px; padding:2px 4px;" onclick="document.getElementById('editCoverFile_${m.id}').click()">📁上传</button>
+             <button class="h-btn" id="btnAuto_${m.id}" style="font-size:10px; padding:2px 4px;" onclick="doAutoUpdateCover('${m.id}', '${m.title}', '${m.media_type}')">🔍搜图</button>
+         </div>
+       </div>
        <div style="flex:1;">
           <div style="font-size:14px; font-weight:bold; color:var(--t); margin-bottom:8px">评分簿</div>
           <div style="font-size:12px; color:var(--td); margin-bottom:4px">👩 你的打分：<span style="color:var(--ac)">${'⭐'.repeat(m.user_score||0)}</span></div>
@@ -1808,7 +1848,6 @@ function addSegUI() {
   container.appendChild(div);
 }
 
-// 👉 核心修复3：新增的“保存草稿进度”函数
 async function saveMediaDraft(id) {
   const score = document.getElementById('mScore').value;
   const container = document.getElementById('segContainer');
@@ -1817,9 +1856,7 @@ async function saveMediaDraft(id) {
   for(let i=0; i<container.children.length; i++) {
      const st = document.getElementById('ts_start_'+i)?.value;
      const ed = document.getElementById('ts_end_'+i)?.value;
-     if(st && ed) {
-         segments.push({ start: new Date(st).toISOString(), end: new Date(ed).toISOString() });
-     }
+     if(st && ed) segments.push({ start: new Date(st).toISOString(), end: new Date(ed).toISOString() });
   }
   
   try {
@@ -1831,9 +1868,7 @@ async function saveMediaDraft(id) {
     const idx = allMedia.findIndex(m=>m.id === id);
     if(idx !== -1) allMedia[idx] = d;
     alert('进度暂存成功！放心退出吧！');
-  } catch(e) {
-    alert('保存失败: ' + e.message);
-  }
+  } catch(e) { alert('保存失败: ' + e.message); }
 }
 
 async function generateMediaReview(id) {
@@ -1849,8 +1884,7 @@ async function generateMediaReview(id) {
   }
   if(segments.length === 0) return alert('请至少填写一个讨论时间段！');
 
-  btn.textContent = '⏳ 正在调取大模型回忆中，请耐心等待...';
-  btn.disabled = true;
+  btn.textContent = '⏳ 正在调取大模型回忆中，请耐心等待...'; btn.disabled = true;
 
   try {
     await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + id, {
@@ -1863,18 +1897,13 @@ async function generateMediaReview(id) {
       body: JSON.stringify({ api_key: cfg.apiKey, api_base: cfg.apiBase, model: cfg.model })
     });
     
-    if(!r.ok) {
-        const err = await r.json().catch(()=>({}));
-        throw new Error(err.error || '生成失败');
-    }
+    if(!r.ok) { const err = await r.json().catch(()=>({})); throw new Error(err.error || '生成失败'); }
     
     await loadMediaRecords();
     showMediaDetail(id);
-    
   } catch(e) {
     alert(e.message);
-    btn.textContent = '🎉 完结撒花！召唤大模型生成回忆';
-    btn.disabled = false;
+    btn.textContent = '🎉 完结撒花！召唤大模型生成回忆'; btn.disabled = false;
   }
 }
 
@@ -1886,4 +1915,5 @@ async function delMedia(id) {
     renderMediaPanel();
   } catch(e) {}
 }
+
 
