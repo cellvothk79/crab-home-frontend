@@ -154,4 +154,19 @@ html,body{height:100%;overflow:hidden;font-family:var(--f);background:var(--bg);
   .menu-btn{display:block}
 }
 @media(min-width:601px){.menu-btn{display:none}}
+
+/* ════ 书影音模块专属样式 ════ */
+.media-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+.media-card { background: var(--s2); border: 1px solid var(--bd); border-radius: 8px; overflow: hidden; cursor: pointer; transition: 0.2s; position: relative; }
+.media-card:hover { border-color: var(--ac); }
+.media-cover { width: 100%; aspect-ratio: 3/4; object-fit: cover; background: var(--s1); display: flex; align-items: center; justify-content: center; color: var(--tf); font-size: 11px; text-align: center; }
+.media-info { padding: 6px; }
+.media-title { font-size: 11px; font-weight: 600; color: var(--t); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.media-badge { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.6); color: #fff; font-size: 9px; padding: 2px 5px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(4px); }
+.media-tabs { display: flex; gap: 10px; border-bottom: 1px solid var(--bd); margin-bottom: 12px; }
+.media-tab { padding: 6px 8px; font-size: 12px; color: var(--td); cursor: pointer; border-bottom: 2px solid transparent; }
+.media-tab.active { color: var(--ac); border-bottom-color: var(--ac); font-weight: 500; }
+.time-seg { display:flex; gap:5px; margin-bottom:6px; align-items:center; }
+.time-seg input { flex:1; background:var(--bg); border:1px solid var(--bd); color:var(--t); font-size:11px; padding:4px 6px; border-radius:4px; }
+
 </style>
