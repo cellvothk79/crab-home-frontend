@@ -235,8 +235,8 @@ async function loadMessages(){
         content:m.content,
         innerThought:m.inner_thought||'',
         ts:m.created_at,
-        type:(m.role==='call_card'||(m.role==='system'&&m.content.includes('📞 通话'))) ? 'call-card' : (m.is_voice?'voice':'text'),
-        imageUrl:null,
+        type: m.image_url ? 'image' : ((m.role==='call_card'||(m.role==='system'&&m.content.includes('📞 通话'))) ? 'call-card' : (m.is_voice?'voice':'text')),
+        imageUrl: m.image_url || null,
         audioUrl:m.audio_url||null,
         callActive:false,
       }));
@@ -270,8 +270,10 @@ async function loadMoreMessages(){
       content:m.content,
       innerThought:m.inner_thought||'',
       ts:m.created_at,
-      type:(m.role==='call_card'||(m.role==='system'&&m.content.includes('📞 通话'))) ? 'call-card' : (m.is_voice?'voice':'text'),
-      imageUrl:null,audioUrl:m.audio_url||null,callActive:false,
+      type: m.image_url ? 'image' : ((m.role==='call_card'||(m.role==='system'&&m.content.includes('📞 通话'))) ? 'call-card' : (m.is_voice?'voice':'text')),
+      imageUrl: m.image_url || null,
+      audioUrl:m.audio_url||null,
+      callActive:false,
     }));
     messages=[...older,...messages];
     window._oldestMsgTs=older[0].ts;
