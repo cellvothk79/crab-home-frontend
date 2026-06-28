@@ -1072,6 +1072,9 @@ function renderPanel(name){
   else if(name==='settings')el.innerHTML=renderSettingsPanel();
   else if(name==='desire'){renderDesirePanel();} 
   else if(name==='media'){renderMediaPanel();} 
+  else if(name==='searchChat'){renderSearchPanel();} 
+  else if(name==='monitor'){renderMonitorPanel();} 
+
 }
 
 async function renderDesirePanel() {
@@ -1161,7 +1164,7 @@ function applyPreset(i){
 }
 
 function editPreset(i){
-  const p=i>=0?{...cfg.presets[i]}:{id:null,name:'',apiBase:'',apiKey:'',model:''};
+  const p=i>=0?{...cfg.presets[i]}:{id:null,name:'',apiBase:'',apiKey:'',model:'', monitorUrl:'', homeUrl:''};
   const el=document.getElementById('panelContent');
   el.innerHTML=`<div class="panel-hdr"><span class="panel-title">${i>=0?'编辑预设':'新增预设'}</span><button class="h-btn" onclick="renderPanel('preset')">返回</button></div>
     <label class="p-label">预设名称</label><input class="p-inp" id="pName" value="${esc(p.name)}" placeholder="例如：中转站">
@@ -1172,10 +1175,17 @@ function editPreset(i){
       <input class="p-inp" id="pModel" style="margin-bottom:0;flex:1" value="${esc(p.model)}" placeholder="输入或拉取选择">
       <button class="h-btn" onclick="fetchModels(${i})" id="fetchBtn">拉取模型</button>
     </div>
-    <div id="modelSearchWrap" style="display:none;margin-bottom:4px">
-      <input class="p-inp" id="modelSearch" style="margin-bottom:0" placeholder="搜索模型名称..." oninput="filterModels()">
-    </div>
+    <div id="modelSearchWrap" style="display:none;margin-bottom:4px"><input class="p-inp" id="modelSearch" style="margin-bottom:0" placeholder="搜索模型名称..." oninput="filterModels()"></div>
     <div id="modelListEl" class="model-list" style="display:none"></div>
+    
+    <!-- 👇 新增：两个极具前瞻性的动态网址配置！ -->
+    <div style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--bd)">
+        <label class="p-label">监控网址 (可选，比如中转站的 /status 面板)</label>
+        <input class="p-inp" id="pMonitor" value="${esc(p.monitorUrl||'')}" placeholder="https://...">
+        <label class="p-label">主页网址 (可选，一键去充值的地址)</label>
+        <input class="p-inp" id="pHome" value="${esc(p.homeUrl||'')}" placeholder="https://...">
+    </div>
+
     <button class="p-btn save" onclick="savePreset(${i})" style="margin-top:8px">保存</button>
     ${i>=0?`<button class="h-btn" style="width:100%;margin-top:8px;color:#c46;border-color:#c46" onclick="delPreset(${i})">删除此预设</button>`:''}`;
 }
@@ -1220,10 +1230,18 @@ function filterModels(){
   renderModelList(filtered);
 }
 function savePreset(i){
-  const p={id:i>=0?(cfg.presets[i].id||Date.now().toString()):Date.now().toString(),name:document.getElementById('pName').value.trim(),apiBase:document.getElementById('pBase').value.trim(),apiKey:document.getElementById('pKey').value.trim(),model:document.getElementById('pModel').value.trim()};
+  const p={
+      id: i>=0 ? (cfg.presets[i].id||Date.now().toString()) : Date.now().toString(),
+      name: document.getElementById('pName').value.trim(),
+      apiBase: document.getElementById('pBase').value.trim(),
+      apiKey: document.getElementById('pKey').value.trim(),
+      model: document.getElementById('pModel').value.trim(),
+      monitorUrl: document.getElementById('pMonitor').value.trim(), // 👈 保存监控网址
+      homeUrl: document.getElementById('pHome').value.trim()      // 👈 保存主页网址
+  };
   if(!p.name||!p.apiBase||!p.model){alert('请填写名称、API地址和模型');return;}
-  if(i>=0)cfg.presets[i]=p;else cfg.presets.push(p);
-  save(K.cfg,cfg);updatePresetBtn();renderPanel('preset');
+  if(i>=0) cfg.presets[i]=p; else cfg.presets.push(p);
+  save(K.cfg,cfg); updatePresetBtn(); renderPanel('preset');
 }
 function delPreset(i){if(confirm('删除此预设？')){cfg.presets.splice(i,1);save(K.cfg,cfg);renderPanel('preset');}}
 
@@ -1916,4 +1934,95 @@ async function delMedia(id) {
   } catch(e) {}
 }
 
+// ═══════════════════════════════════════
+//  API 动态监控控制台 & 聊天搜索上下文
+// ═══════════════════════════════════════
+
+function renderMonitorPanel() {
+  const p = cfg.presets?.find(p => p.apiBase === cfg.apiBase && p.apiKey === cfg.apiKey);
+  const mUrl = p?.monitorUrl || '';
+  const hUrl = p?.homeUrl || '';
+  const el = document.getElementById('panelContent');
+
+  let iframeHtml = mUrl 
+      ? `<iframe src="${mUrl}" style="width:100%; height:400px; border:1px solid var(--bd); border-radius:8px; background:#fff; margin-bottom:15px;"></iframe>`
+      : `<div style="text-align:center; padding:40px 0; color:var(--tf); font-size:12px; border:1px dashed var(--bd); border-radius:8px; margin-bottom:15px;">当前预设没有配置【监控网址】哦<br>去“预设”里编辑加上吧</div>`;
+
+  let btnHtml = hUrl
+      ? `<button class="p-btn save" onclick="window.open('${hUrl}', '_blank')">💰 去主页查余额 / 充值 (新窗口打开)</button>`
+      : `<button class="p-btn" style="background:var(--s2); color:var(--tf); cursor:not-allowed" disabled>未配置主页网址</button>`;
+
+  el.innerHTML = `
+    <div class="panel-hdr"><span class="panel-title">📊 中转站监控 (当前: ${esc(p?.name||'未知')})</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+    ${iframeHtml}
+    ${btnHtml}
+  `;
+}
+
+function renderSearchPanel() {
+  const el = document.getElementById('panelContent');
+  el.innerHTML = `
+    <div class="panel-hdr"><span class="panel-title">🔍 搜索聊天记录</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
+    <div style="display:flex; gap:6px; margin-bottom:15px;">
+       <input class="p-inp" id="chatSearchInput" style="margin-bottom:0; flex:1" placeholder="输入你想找的话..." onkeydown="if(event.key==='Enter') doSearchChat()">
+       <button class="h-btn" style="color:var(--ac); border-color:var(--ac)" onclick="doSearchChat()">搜索</button>
+    </div>
+    <div id="chatSearchResults" style="max-height:400px; overflow-y:auto;">
+       <div style="color:var(--tf); text-align:center; font-size:12px; padding:20px 0;">搜出来的记录会显示在这里<br>点击就能查看上下文</div>
+    </div>
+  `;
+}
+
+async function doSearchChat() {
+  const q = document.getElementById('chatSearchInput').value.trim();
+  const resEl = document.getElementById('chatSearchResults');
+  if(!q || !currentSession || !cfg.base) return;
+  resEl.innerHTML = '<div style="color:var(--td); text-align:center; font-size:12px; padding:20px 0;">搜索中...</div>';
+  
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + `/api/chat/search?session_id=${currentSession.id}&q=${encodeURIComponent(q)}`);
+    const data = await r.json();
+    if(data.length === 0) {
+        resEl.innerHTML = '<div style="color:var(--td); text-align:center; font-size:12px; padding:20px 0;">没有搜到相关内容</div>';
+        return;
+    }
+    resEl.innerHTML = data.map(m => `
+      <div style="background:var(--s2); border:1px solid var(--bd); border-radius:8px; padding:10px; margin-bottom:8px; cursor:pointer;" onclick="showChatContext('${m.id}')">
+         <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+            <span style="font-size:11px; color:${m.role==='user'?'var(--t)':'var(--ac)'}">${m.role==='user'?'👩 你':'🦀 他'}</span>
+            <span style="font-size:10px; color:var(--tf)">${fmtTime(m.created_at)}</span>
+         </div>
+         <div style="font-size:12px; color:var(--t); line-height:1.5;">${esc(m.content).replace(new RegExp(q, 'gi'), match => `<span style="color:#000; background:var(--ac); padding:0 2px; border-radius:2px">${match}</span>`)}</div>
+      </div>
+    `).join('');
+  } catch(e) { resEl.innerHTML = '搜索失败'; }
+}
+
+async function showChatContext(msgId) {
+  const el = document.getElementById('panelContent');
+  el.innerHTML = `<div class="panel-hdr"><span class="panel-title">📜 时光倒流 (上下文)</span><button class="h-btn" onclick="renderSearchPanel()">← 返回搜索</button></div>
+  <div id="contextBox" style="max-height:450px; overflow-y:auto; padding:10px; background:#111; border-radius:8px; border:1px solid #000; text-align:center; color:var(--td); font-size:12px;">加载上下文回忆中...</div>`;
+  
+  try {
+    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/chat/context/' + msgId);
+    const data = await r.json();
+    const box = document.getElementById('contextBox');
+    
+    box.innerHTML = data.map(c => `
+      <div id="ctx_${c.id}" style="text-align:left; margin-bottom:12px; padding:${c.id === msgId ? '8px' : '0'}; background:${c.id === msgId ? 'rgba(212,165,116,0.1)' : 'transparent'}; border-radius:6px; border:${c.id === msgId ? '1px solid var(--ac)' : 'none'};">
+         <div style="font-size:10px; color:${c.role==='user'?'var(--td)':'rgba(212,165,116,0.7)'}; margin-bottom:4px;">
+            ${c.role==='user'?'👩 你':'🦀 他'} · ${fmtTime(c.created_at)}
+         </div>
+         <div style="font-size:12.5px; color:${c.id === msgId ? 'var(--t)' : 'var(--td)'}; line-height:1.5;">${esc(c.content)}</div>
+      </div>
+    `).join('');
+    
+    // 自动滚动到那句话的位置，并且居中！
+    setTimeout(() => {
+        const target = document.getElementById('ctx_' + msgId);
+        if(target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+
+  } catch(e) { document.getElementById('contextBox').innerHTML = '加载上下文失败'; }
+}
 
