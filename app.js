@@ -344,20 +344,31 @@ function renderMsg(m){
   let q='';
   const quoteText=m.quoteContent||(m.quote?.content)||'';
   if(quoteText)q=`<div class="quote-preview"><span style="opacity:.6">引用: </span>${esc(quoteText.slice(0,55))}${quoteText.length>55?'...':''}</div>`;
+  
   let inner='';
-  if(m.type==='image') inner=`<img src="${m.imageUrl}" alt="图片">`;
-  else {
-    // 👇 魔法解析器：把 [sticker:xxx] 变成真实的图片！
-        // 👉 核心黑科技：保留 SVG 标签，让他画的画能显示出来！
-    let safeTxt = m.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    safeTxt = safeTxt.replace(/&lt;svg([\s\S]*?)&lt;\/svg&gt;/gi, '<svg$1</svg>'); // 把转义的 SVG 还原回去
-
-    safeTxt = safeTxt.replace(/\[sticker:([a-zA-Z0-9_]+)\]/g, (match, sid) => {
-        const s = sysStickers.find(x => x.sticker_id === sid);
-        return s ? `<br><img src="${s.image_url}" style="width:120px; height:120px; object-fit:contain; background:transparent; margin:4px 0;"><br>` : match;
-    });
-    inner=`<span style="white-space:pre-wrap">${safeTxt}</span>`;
+  
+  // 👇 修复 2：终极画板解析器，把大模型的 SVG 代码变成真实的画！
+  let safeTxt = m.content || '';
+  let svgMatch = safeTxt.match(/```(?:xml|svg|html)?\n*(<svg[\s\S]*?<\/svg>)\n*```/i) || safeTxt.match(/(<svg[\s\S]*?<\/svg>)/i);
+  let svgCode = '';
+  if (svgMatch) {
+      svgCode = svgMatch[1]; // 提取出真实的 svg 代码
+      safeTxt = safeTxt.replace(svgMatch[0], '[SVG_PLACEHOLDER]');
   }
+  safeTxt = esc(safeTxt); // 过滤其他文字
+  if (svgCode) {
+      // 把画渲染在一个白色的漂亮画框里
+      safeTxt = safeTxt.replace('[SVG_PLACEHOLDER]', `<div style="background:#fff;padding:10px;border-radius:8px;margin-top:5px;width:100%;overflow:hidden;">${svgCode}</div>`);
+  }
+
+  // 👇 修复 3：如果你发了图片，文字和图片一起显示，绝不吞字！
+  if(m.type==='image') {
+      inner=`<img src="${m.imageUrl}" alt="图片" style="max-width:160px; border-radius:8px; display:block;">`;
+      if (safeTxt.trim()) inner += `<div style="margin-top:4px;">${safeTxt}</div>`;
+  } else {
+      inner=`<span style="white-space:pre-wrap">${safeTxt}</span>`;
+  }
+
   const avHtml=cfg.showAvatar?`<div class="avatar ${isU?'av-user':'av-bot'}">${isU?'🦀':'🦀'}</div>`:'';
   const ttsBtn=(!isU&&cfg.base)?`<button onclick="playTTS(event,'${m.id}')" style="background:none;border:none;color:var(--td);font-size:12px;cursor:pointer;padding:2px 4px;opacity:.6" title="听语音">🔊</button>`:'';
 
@@ -370,6 +381,7 @@ function renderMsg(m){
     </div>
   </div>`;
 }
+
 
 function renderCallCard(m){
   const active=m.callActive;
@@ -559,7 +571,9 @@ async function send(){
 
     let reply='';
     if(cfg.base){
-      const body={session_id:currentSession.id,content:combinedContent||text,model:cfg.model};
+           // 👈 把 window._activeMusic 一起传给后端
+      const body={session_id:currentSession.id,content:combinedContent||text,model:cfg.model, api_key:cfg.apiKey, api_base:cfg.apiBase, system_prompt_override:cfg.systemPrompt, active_music: window._activeMusic || null};
+
       if(cfg.apiKey)body.api_key=cfg.apiKey;
       if(cfg.apiBase)body.api_base=cfg.apiBase;
       if(cfg.systemPrompt)body.system_prompt_override=cfg.systemPrompt;
@@ -1121,13 +1135,11 @@ async function renderDesirePanel() {
     const d = await desireRes.json();
     const q = await queueRes.json();
 
-    // 👉 加上了 cursor:pointer 和 onclick，点任意一个条就能画折线图！
+    // 👇 修复 1：修正了参数顺序和空值处理，绝对不会再显示 NaN
     const renderBar = (key, label, val, color) => {
-      // 👇 核心修复：防止空值报错
       const safeVal = Number(val || 0);
       const pct = Math.min(100, Math.max(0, safeVal * 100)).toFixed(1);
-      return `
-      <div style="margin-bottom:12px; cursor:pointer;" onclick="showDesireChart('${key}', '${label}', '${color}')" title="点击查看历史趋势图">
+      return `<div style="margin-bottom:12px; cursor:pointer;" onclick="showDesireChart('${key}', '${label}', '${color}')" title="点击查看历史趋势图">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--td);margin-bottom:4px">
           <span>${label} (点我查波形)</span><span>${safeVal.toFixed(2)}</span>
         </div>
@@ -1137,15 +1149,13 @@ async function renderDesirePanel() {
       </div>`;
     };
 
-
-
     let html = `<div style="padding: 10px; background: rgba(212,165,116,0.05); border: 1px solid rgba(212,165,116,0.2); border-radius: 12px; margin-bottom: 16px;">`;
-    html += renderBar('💓 想念程度 (Attachment) - 满0.7触发', d.attachment || 0, '#d4a574');
-    html += renderBar('🌩️ 情绪压力 (Stress)', d.stress || 0, '#c46');
-    html += renderBar('🫂 亲密驱动 (Libido)', d.libido || 0, '#e585b6');
-    html += renderBar('📌 记挂责任 (Duty)', d.duty || 0, '#6478b4');
-    html += renderBar('📖 沉淀回忆 (Reflection)', d.reflection || 0, '#888');
-    html += renderBar('💤 疲劳控制 (Fatigue) - 满0.8罢工', d.fatigue || 0, '#555');
+    html += renderBar('attachment', '💓 想念程度 (Attachment) - 满0.7触发', d.attachment, '#d4a574');
+    html += renderBar('stress', '🌩️ 情绪压力 (Stress)', d.stress, '#c46');
+    html += renderBar('libido', '🫂 亲密驱动 (Libido)', d.libido, '#e585b6');
+    html += renderBar('duty', '📌 记挂责任 (Duty)', d.duty, '#6478b4');
+    html += renderBar('reflection', '📖 沉淀回忆 (Reflection)', d.reflection, '#888');
+    html += renderBar('fatigue', '💤 疲劳控制 (Fatigue) - 满0.8罢工', d.fatigue, '#555');
     html += `<div style="font-size:10px;color:var(--tf);text-align:right;margin-top:4px">最后心跳跳动: ${fmtTime(d.updated_at)}</div></div>`;
 
     html += `<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--t)">💌 偷偷藏在身后的纸条 (待发送)</div>`;
@@ -1166,7 +1176,6 @@ async function renderDesirePanel() {
         </div>`;
       }).join('');
     }
-
     html += `<button onclick="renderDesirePanel()" style="width:100%;margin-top:12px;padding:8px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;color:var(--td);font-size:12px;cursor:pointer">🔄 刷新状态</button>`;
     document.getElementById('desireContent').innerHTML = html;
   } catch (e) {
@@ -2274,12 +2283,13 @@ function clearCanvas() {
 function sendDrawing() {
   const canvas = document.getElementById('dCanvas');
   const b64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
-  // 👇 修复：不再强行写文字，只发图片，然后把光标交给你自己打字！
+  // 👇 不再擅作主张替你发文字，画完图把光标还给你自己打字！
   const m = {id:Date.now().toString(), role:'user', content:'', ts:new Date().toISOString(), type:'image', imageUrl:canvas.toDataURL('image/jpeg'), imageBase64:b64, imageMime:'image/jpeg'};
   messages.push(m); saveMessages(); renderMessages();
   document.getElementById('drawingBoard').style.display = 'none';
-  document.getElementById('msgInput').focus(); // 光标跳回输入框让你自己说话
+  document.getElementById('msgInput').focus(); 
 }
+
 
 
 let desireChartInstance = null;
