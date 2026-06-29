@@ -2487,17 +2487,28 @@ function toggleExpandPanel() {
     btn.style.background = 'var(--s2)';
   }
 }
-// 👉 全屏放大查看图片或画作
-// 👉 全屏放大查看图片或画作 (高级白板画框版)
-function openZoomModal(encodedData, type) {
+// 👉 全屏放大查看图片或画作 (防浏览器卡死版)
+function openZoomImage(id) {
+  const m = messages.find(x => x.id === id);
+  if(m && m.imageUrl) openZoomModal(m.imageUrl, 'image', false);
+}
+
+function openZoomSvg(id) {
+  const m = messages.find(x => x.id === id);
+  if(!m) return;
+  let svgMatch = m.content.match(/```(?:xml|svg|html)?\n*(<svg[\s\S]*?<\/svg>)\n*```/i) || m.content.match(/(<svg[\s\S]*?<\/svg>)/i);
+  if(svgMatch) openZoomModal(svgMatch[1], 'svg', false);
+}
+
+function openZoomModal(data, type, isEncoded = true) {
   let contentHtml = '';
-  const data = decodeURIComponent(encodedData);
+  // 如果是表情包，解码 URL；如果是图片/SVG 的 Base64 原码，直接用！
+  const decodedData = isEncoded ? decodeURIComponent(data) : data;
   
   if (type === 'image') {
-     contentHtml = `<img src="${data}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,0.5);">`;
+     contentHtml = `<img src="${decodedData}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,0.5);">`;
   } else if (type === 'svg') {
-     // 👈 核心修复：如果是 AI 画的画，给它套一个白色的、超大的专属正方形画框！
-     const fixedSvg = data.replace(/<svg/i, '<svg style="width:100%;height:100%;"');
+     const fixedSvg = decodedData.replace(/<svg/i, '<svg style="width:100%;height:100%;"');
      contentHtml = `<div style="width:90vw; height:90vw; max-width:500px; max-height:500px; background:#fff; padding:20px; border-radius:16px; display:flex; align-items:center; justify-content:center; box-shadow:0 10px 40px rgba(0,0,0,0.6);">${fixedSvg}</div>`;
   }
 
@@ -2511,6 +2522,7 @@ function openZoomModal(encodedData, type) {
   `;
   document.body.appendChild(div);
 }
+
 // 👉 手动肘击逻辑：偷偷发送极度严厉的系统警告，强迫他秒回！
 async function elbowStrike() {
   if(!confirm('觉得他太机械了？点确定给他个肘击，让他清醒一下！')) return;
