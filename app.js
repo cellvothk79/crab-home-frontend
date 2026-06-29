@@ -364,24 +364,21 @@ function renderMsg(m){
   }
   safeTxt = esc(safeTxt); 
   if (svgCode) {
-      // 👈 核心修复：强行注入 CSS，让画作 100% 填满气泡，绝对不会再缩成三个字那么小！
       let fixedSvg = svgCode.replace(/<svg/i, '<svg style="width:100%; height:auto; min-height:150px; display:block;"');
-      // 把原始代码编码，传给放大镜，绝对不丢失！
-      let encodedSvg = encodeURIComponent(svgCode);
-      safeTxt = safeTxt.replace('[SVG_PLACEHOLDER]', `<div style="background:#fff;padding:10px;border-radius:8px;margin-top:5px;width:100%;overflow:hidden;cursor:zoom-in;box-shadow:inset 0 0 4px rgba(0,0,0,0.1);" onclick="openZoomModal('${encodedSvg}', 'svg')">${fixedSvg}</div>`);
+      // 👈 核心修复：只传 ID，绝对不给浏览器塞乱码！
+      safeTxt = safeTxt.replace('[SVG_PLACEHOLDER]', `<div style="background:#fff;padding:10px;border-radius:8px;margin-top:5px;width:100%;overflow:hidden;cursor:zoom-in;box-shadow:inset 0 0 4px rgba(0,0,0,0.1);" onclick="openZoomSvg('${m.id}')">${fixedSvg}</div>`);
   }
 
-  // 👇 修复 3：如果你发了图片，文字和图片一起显示，并且安全传给放大镜！
+  // 👇 修复 3：如果你发了图片，只把 ID 传给放大镜，浏览器绝对不崩溃！
   if(m.type==='image') {
-      let encodedImg = encodeURIComponent(m.imageUrl);
-      inner=`<img src="${m.imageUrl}" alt="图片" style="max-width:160px; border-radius:8px; display:block; cursor:zoom-in;" onclick="openZoomModal('${encodedImg}', 'image')">`;
+      inner=`<img src="${m.imageUrl}" alt="图片" style="max-width:160px; border-radius:8px; display:block; cursor:zoom-in;" onclick="openZoomImage('${m.id}')">`;
       if (safeTxt.trim()) inner += `<div style="margin-top:4px;">${safeTxt}</div>`;
   } else {
-      // 表情包渲染逻辑保留
       if (typeof sysStickers !== 'undefined') {
           safeTxt = safeTxt.replace(/\[sticker:([a-zA-Z0-9_]+)\]/g, (match, sid) => {
               const s = sysStickers.find(x => x.sticker_id === sid);
-              return s ? `<br><img src="${s.image_url}" style="width:120px; height:120px; object-fit:contain; background:transparent; margin:4px 0; cursor:zoom-in;" onclick="openZoomModal('${encodeURIComponent(s.image_url)}', 'image')"><br>` : match;
+              // 表情包因为是短 URL，不需要传 ID，直接传即可
+              return s ? `<br><img src="${s.image_url}" style="width:120px; height:120px; object-fit:contain; background:transparent; margin:4px 0; cursor:zoom-in;" onclick="openZoomModal('${encodeURIComponent(s.image_url)}', 'image', true)"><br>` : match;
           });
       }
       inner=`<span style="white-space:pre-wrap">${safeTxt}</span>`;
