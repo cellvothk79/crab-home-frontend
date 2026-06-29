@@ -1228,17 +1228,37 @@ async function renderDesirePanel() {
 function renderPresetPanel(){
   const cards=(cfg.presets||[]).map((p,i)=>`
     <div class="preset-card${cfg.apiKey===p.apiKey&&cfg.apiBase===p.apiBase?' active':''}" onclick="applyPreset(${i})">
-      <div>
+      <div style="flex:1; overflow:hidden; padding-right:8px;">
         <div style="font-size:13px;font-weight:500;margin-bottom:2px">${esc(p.name)}${cfg.apiBase===p.apiBase&&cfg.apiKey===p.apiKey?' ✓':''}</div>
-        <div style="font-size:11px;color:var(--td)">${esc(p.model.slice(0,22))} · ${p.apiBase.replace('https://','').slice(0,18)}</div>
+        <div style="font-size:11px;color:var(--td); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(p.model.slice(0,22))} · ${p.apiBase.replace('https://','').slice(0,18)}</div>
       </div>
-      <button class="h-btn" onclick="event.stopPropagation();editPreset(${i})">编辑</button>
+      <!-- 👇 核心修改：把原来的单一编辑按钮，变成了“复制 + 编辑”双开门！ -->
+      <div style="display:flex; gap:4px; flex-shrink:0;">
+        <button class="h-btn" onclick="event.stopPropagation();duplicatePreset(${i})">复制</button>
+        <button class="h-btn" onclick="event.stopPropagation();editPreset(${i})">编辑</button>
+      </div>
     </div>`).join('');
   return`<div class="panel-hdr"><span class="panel-title">API 预设</span><button class="h-btn" onclick="closePanel()">关闭</button></div>
     <p style="font-size:11px;color:var(--td);margin-bottom:10px">点击切换，一键换用不同 API 配置</p>
     ${cards}
     <button class="p-btn ghost" onclick="editPreset(-1)">+ 新增预设</button>`;
 }
+
+// 👉 核心新增：一键克隆预设的魔法函数
+function duplicatePreset(i) {
+  // 把原来的配置深拷贝一份
+  const p = { ...cfg.presets[i] };
+  p.id = Date.now().toString(); // 给副本发个新身份证
+  p.name = p.name + ' (副本)';   // 名字加上后缀防混淆
+  
+  // 塞进列表里并保存
+  cfg.presets.push(p);
+  save(K.cfg, cfg);
+  
+  // 原地刷新面板
+  renderPresetPanel();
+}
+
 
 function applyPreset(i){
   const p=cfg.presets[i];cfg.apiBase=p.apiBase;cfg.apiKey=p.apiKey;cfg.model=p.model;
