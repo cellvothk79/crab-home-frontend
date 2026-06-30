@@ -162,4 +162,9 @@ html, body { height: 100%; overflow: hidden; font-family: var(--f); background: 
   .music-widget { top: 70px; right: 10px; padding: 10px; }
 }
 @media(min-width:601px){ .menu-btn { display: none; } }
+/* ════ 右键菜单 / 长按菜单 (高级毛玻璃版) ════ */
+.ctx { position: fixed; background: rgba(36, 33, 32, 0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 6px; z-index: 9999; min-width: 140px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+.ctx-item { display: block; width: 100%; padding: 10px 14px; background: none; border: none; color: var(--t); font-size: 13px; cursor: pointer; text-align: left; border-radius: 8px; font-family: var(--f); transition: 0.2s; font-weight: 500; }
+.ctx-item:hover { background: rgba(255,255,255,0.08); color: var(--ac); padding-left: 18px; }
+
 </style>
