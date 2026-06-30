@@ -1148,8 +1148,18 @@ function updatePresetBtn(){
 
 // ═══════════ PANELS ═══════════
 let curPanel=null;
-function openPanel(name){curPanel=name;document.getElementById('overlay').style.display='flex';renderPanel(name);}
-function closePanel(){document.getElementById('overlay').style.display='none';curPanel=null;}
+function openPanel(name){
+  hideSb(); // 👈 核心修复：打开任何面板时，先强制把手机侧边栏收起来，绝对不会再卡死叠加！
+  curPanel=name;
+  document.getElementById('overlay').style.display='flex';
+  renderPanel(name);
+}
+
+function closePanel(){
+  document.getElementById('overlay').style.display='none';
+  curPanel=null;
+}
+
 
 function renderPanel(name){
   const el=document.getElementById('panelContent');
