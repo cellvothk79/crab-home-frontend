@@ -63,6 +63,7 @@ let nowTimer=null;
   // 👉 每 10 秒向后端抛一个媚眼，告诉他你在线，并顺便看看有没有新消息
   setInterval(async () => {
     if (!currentSession || !cfg.base || document.visibilityState !== 'visible') return;
+    if (streaming) return; 
     const lastTs = messages.length ? messages[messages.length-1].ts : '';
     try {
       const r = await fetch(cfg.base.replace(/\/+$/, '') + `/api/heartbeat/${currentSession.id}?last_ts=${lastTs}`);
