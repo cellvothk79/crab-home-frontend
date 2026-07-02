@@ -166,5 +166,37 @@ html, body { height: 100%; overflow: hidden; font-family: var(--f); background: 
 .ctx { position: fixed; background: rgba(36, 33, 32, 0.85); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 6px; z-index: 9999; min-width: 140px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 .ctx-item { display: block; width: 100%; padding: 10px 14px; background: none; border: none; color: var(--t); font-size: 13px; cursor: pointer; text-align: left; border-radius: 8px; font-family: var(--f); transition: 0.2s; font-weight: 500; }
 .ctx-item:hover { background: rgba(255,255,255,0.08); color: var(--ac); padding-left: 18px; }
+/* ════ 动态 (Moments) 朋友圈专属样式 ════ */
+.moment-card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 16px; margin-bottom: 16px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); transition: transform 0.2s; position: relative; }
+.moment-card:hover { border-color: rgba(226,155,104,0.2); }
+.moment-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.moment-user { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: var(--t); }
+.moment-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, rgba(120,140,200,0.3), rgba(120,140,200,0.1)); border: 1px solid rgba(120,140,200,0.2); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.moment-time { font-size: 11px; color: var(--tf); }
+.moment-content { font-size: 14px; line-height: 1.7; color: var(--t); margin-bottom: 12px; white-space: pre-wrap; word-break: break-word; }
+.moment-meta { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--td); border-top: 1px dashed rgba(255,255,255,0.05); padding-top: 10px; }
+.moment-meta-left { display: flex; gap: 10px; align-items: center; }
+.moment-tag { background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; }
+.moment-comments-btn { cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.03); padding: 3px 8px; border-radius: 6px; }
+.moment-comments-btn:hover { color: var(--ac); background: rgba(226,155,104,0.1); }
+.moment-comments-area { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.05); }
+.moment-comment-list { max-height: 300px; overflow-y: auto; margin-bottom: 10px; }
+.moment-comment-list::-webkit-scrollbar { width: 4px; }
+.moment-comment-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+.moment-comment-item { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12.5px; line-height: 1.5; padding: 8px 10px; background: rgba(0,0,0,0.2); border-radius: 8px; }
+.moment-comment-item .c-user { color: var(--ac); font-weight: 500; margin-right: 4px; flex-shrink: 0; }
+.moment-comment-item .c-ai { color: var(--td); font-weight: 500; margin-right: 4px; flex-shrink: 0; }
+.moment-comment-item .c-content { color: var(--t); flex: 1; word-break: break-word; }
+.moment-comment-item .c-time { font-size: 10px; color: var(--tf); flex-shrink: 0; margin-left: 8px; margin-top: 2px; }
+.moment-comment-del { cursor: pointer; color: #c46; font-size: 14px; background: none; border: none; padding: 0 4px; opacity: 0.6; }
+.moment-comment-del:hover { opacity: 1; }
+.moment-input-wrap { display: flex; gap: 8px; }
+.moment-input { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--bd); border-radius: 8px; padding: 8px 12px; color: var(--t); font-size: 13px; outline: none; transition: 0.2s; }
+.moment-input:focus { border-color: var(--ac); box-shadow: 0 0 0 2px var(--acl); }
+.moment-send-btn { background: var(--ac); color: #0c0b0e; border: none; border-radius: 8px; padding: 0 14px; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+.moment-send-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(226,155,104,0.3); }
+.moment-send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+.moment-del-btn { background: none; border: none; color: var(--tf); cursor: pointer; font-size: 14px; padding: 4px; }
+.moment-del-btn:hover { color: #c46; }
 
 </style>
