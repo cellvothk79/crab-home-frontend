@@ -30,6 +30,7 @@
       <button class="sb-btn" onclick="openPanel('moments')" style="color:var(--ac); border-color:var(--acb); background:var(--acl)">动态</button>
       <button class="sb-btn" onclick="openPanel('searchChat')">搜聊天</button>
       <button class="sb-btn" onclick="openPanel('monitor')">监控</button>
+      <button class="sb-btn" onclick="openPanel('musicLib')">音乐库</button>
       <button class="sb-btn" onclick="openPanel('desire')" style="color:var(--ac); border-color:var(--acb); background:var(--acl)">状态</button>
       <button class="sb-btn" onclick="openPanel('settings')">设置</button>
     </div>
@@ -202,14 +203,62 @@
 <script src="./call.js"></script>
 <script src="./app.js"></script>
 <!-- 音乐组件 -->
-<div class="music-widget" id="musicWidget">
-  <div class="vinyl-record" id="vinylRecord"><img id="vinylCover" src=""></div>
-  <div class="music-info">
-    <div class="music-name" id="mTrackName">准备中...</div>
-    <div class="music-artist" id="mArtistName"></div>
+<!-- 🎵 迷你播放条 (全局悬浮) -->
+<div id="miniPlayer" style="display:none; position:fixed; top:65px; right:20px; width:240px; background:rgba(26,24,23,0.85); backdrop-filter:blur(15px); border:1px solid rgba(255,255,255,0.08); border-radius:16px; padding:8px 12px; z-index:90; box-shadow:0 10px 30px rgba(0,0,0,0.5); align-items:center; gap:10px; cursor:pointer;" onclick="toggleFullPlayer()">
+  <div class="vinyl-record mini-vinyl" id="miniVinyl"><img id="miniCover" src=""></div>
+  <div style="flex:1; overflow:hidden;">
+    <div id="miniTitle" style="font-size:12px; color:var(--t); font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">听歌...</div>
+    <div id="miniArtist" style="font-size:10px; color:var(--td); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
   </div>
-  <button style="background:none;border:none;color:var(--t);font-size:16px;cursor:pointer" onclick="closeMusic()">×</button>
+  <button id="miniPlayBtn" onclick="event.stopPropagation(); togglePlay()" style="background:none; border:none; color:var(--ac); font-size:24px; cursor:pointer;">▶</button>
+  <button onclick="event.stopPropagation(); closeMusicPlayer()" style="background:none; border:none; color:var(--tf); font-size:16px; cursor:pointer; padding-left:4px;">✕</button>
 </div>
+
+<!-- 🎵 全屏播放页 -->
+<div id="fullPlayer" style="display:none; position:fixed; inset:0; z-index:9999; flex-direction:column; background:#111;">
+  <!-- 背景高斯模糊 -->
+  <div id="playerBg" style="position:absolute; inset:-50px; background-size:cover; background-position:center; filter:blur(40px) brightness(0.4); z-index:1;"></div>
+  
+  <div style="position:relative; z-index:2; display:flex; flex-direction:column; height:100%; padding:20px;">
+    <!-- 顶部栏 -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:30px;">
+      <button onclick="toggleFullPlayer()" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer;">⬇</button>
+      <div style="text-align:center;">
+        <div style="font-size:11px; color:rgba(255,255,255,0.6); letter-spacing:2px;">正在播放</div>
+      </div>
+      <button id="favBtn" onclick="toggleFavoriteSong()" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer;">♡</button>
+    </div>
+
+    <!-- 中间：旋转封面 & 歌词 -->
+    <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; overflow:hidden;">
+      <div class="vinyl-record full-vinyl" id="fullVinyl" style="width:240px; height:240px; margin-bottom:30px; border:4px solid rgba(255,255,255,0.1); box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+        <img id="fullCover" src="" style="width:160px; height:160px;">
+      </div>
+      <div id="fullTitle" style="font-size:22px; font-weight:bold; color:#fff; margin-bottom:8px; text-align:center;"></div>
+      <div id="fullArtist" style="font-size:14px; color:rgba(255,255,255,0.7); margin-bottom:20px; text-align:center;"></div>
+      
+      <!-- 歌词容器 -->
+      <div id="lrcContainer" style="width:100%; max-width:400px; height:120px; overflow-y:auto; text-align:center; mask-image:linear-gradient(to bottom, transparent, black 20%, black 80%, transparent); -webkit-mask-image:linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);">
+        <div id="lrcBox" style="transition: transform 0.3s ease; padding: 50px 0;"></div>
+      </div>
+    </div>
+
+    <!-- 底部：进度条 & 控制区 -->
+    <div style="width:100%; max-width:400px; margin:0 auto; padding-bottom:20px;">
+      <div style="display:flex; align-items:center; gap:10px; font-size:10px; color:rgba(255,255,255,0.6); margin-bottom:15px;">
+        <span id="timeCurrent">0:00</span>
+        <input type="range" id="progressRange" value="0" min="0" max="100" style="flex:1; accent-color:var(--ac); height:4px;">
+        <span id="timeTotal">0:00</span>
+      </div>
+      <div style="display:flex; justify-content:space-evenly; align-items:center;">
+        <button onclick="playPrevSong()" class="music-ctrl-btn">⏮</button>
+        <button id="mainPlayBtn" onclick="togglePlay()" class="music-ctrl-btn" style="font-size:48px;">▶️</button>
+        <button onclick="playNextSong()" class="music-ctrl-btn">⏭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 <!-- 画板组件 -->
 <div id="drawingBoard">
@@ -227,6 +276,9 @@
      <button class="h-btn" style="width:120px; background:var(--s2)" onclick="document.getElementById('drawingBoard').style.display='none'">取消</button>
   </div>
 </div>
+
+<script src="./music.js"></script> <!-- 👈 新加这一行 -->
+
 
 </body>
 </html>
