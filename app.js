@@ -366,9 +366,17 @@ function renderMsg(m){
   safeTxt = esc(safeTxt); 
   if (svgCode) {
       let fixedSvg = svgCode.replace(/<svg/i, '<svg style="width:100%; height:auto; min-height:150px; display:block;"');
-      // 👈 核心修复：只传 ID，绝对不给浏览器塞乱码！
       safeTxt = safeTxt.replace('[SVG_PLACEHOLDER]', `<div style="background:#fff;padding:10px;border-radius:8px;margin-top:5px;width:100%;overflow:hidden;cursor:zoom-in;box-shadow:inset 0 0 4px rgba(0,0,0,0.1);" onclick="openZoomSvg('${m.id}')">${fixedSvg}</div>`);
   }
+
+  // 👇 核心黑科技：识别 AI 给你的点歌指令！
+  safeTxt = safeTxt.replace(/\[play:\s*(.+?)\]/gi, (match, song) => {
+      // 变成一个漂亮的播放按钮，点击自动搜索并全屏播放！
+      return `<br><button class="h-btn" style="color:var(--ac); border-color:var(--ac); display:flex; align-items:center; gap:5px; margin:5px 0;" onclick="searchAndPlay('${song}', true)">
+         <span style="font-size:16px">🎵</span> 他为你点播了《${song}》
+      </button><br>`;
+  });
+
 
   // 👇 修复 3：如果你发了图片，只把 ID 传给放大镜，浏览器绝对不崩溃！
   if(m.type==='image') {
@@ -1178,6 +1186,7 @@ function renderPanel(name){
   else if(name==='searchChat'){renderSearchPanel();} 
   else if(name==='monitor'){renderMonitorPanel();} 
   else if(name==='moments'){renderMomentsPanel();} 
+  else if(name==='musicLib'){renderMusicLibPanel();} 
 
 }
 
@@ -2333,47 +2342,6 @@ let globalMusic = new Audio();
 // 增加全局变量记录当前播放的歌
 window._activeMusic = ''; 
 
-async function openMusicSearch() {
-  const q = prompt('想和他一起听什么歌？(输入歌名或歌手)');
-  if(!q) return;
-  try {
-    const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/music/search?q=' + encodeURIComponent(q));
-    const d = await r.json();
-    if(d.name) {
-      document.getElementById('mTrackName').textContent = d.name;
-      document.getElementById('mArtistName').textContent = d.artist;
-      document.getElementById('vinylCover').src = d.cover;
-      document.getElementById('musicWidget').classList.add('show');
-      
-      // 👇 核心修复1：只在后台静默记录，绝对不发到聊天界面里！
-      window._activeMusic = `${d.name} - ${d.artist}`;
-
-      const recordEl = document.getElementById('vinylRecord');
-      if(d.preview) {
-        globalMusic.src = d.preview;
-        globalMusic.play();
-        recordEl.classList.add('playing');
-        globalMusic.onended = () => { recordEl.classList.remove('playing'); window._activeMusic = ''; };
-      } else {
-        recordEl.classList.add('playing');
-      }
-
-      // 👇 核心修复2：点击唱片机，实现暂停/继续播放！
-      recordEl.onclick = () => {
-         if(!globalMusic.src) return;
-         if(globalMusic.paused) { globalMusic.play(); recordEl.classList.add('playing'); }
-         else { globalMusic.pause(); recordEl.classList.remove('playing'); }
-      };
-
-    } else { alert('没搜到这首歌呀~'); }
-  } catch(e) { alert('搜歌失败'); }
-}
-
-function closeMusic() {
-  document.getElementById('musicWidget').classList.remove('show');
-  globalMusic.pause(); document.getElementById('vinylRecord').classList.remove('playing');
-  window._activeMusic = ''; // 关掉音乐就清除后台状态
-}
 
 
 
