@@ -198,5 +198,18 @@ html, body { height: 100%; overflow: hidden; font-family: var(--f); background: 
 .moment-send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
 .moment-del-btn { background: none; border: none; color: var(--tf); cursor: pointer; font-size: 14px; padding: 4px; }
 .moment-del-btn:hover { color: #c46; }
+/* ════ 音乐播放器进阶样式 ════ */
+.mini-vinyl { width: 36px; height: 36px; }
+.mini-vinyl img { width: 14px; height: 14px; }
+.full-vinyl img { width: 100px; height: 100px; }
+
+.lrc-line { font-size: 14px; color: rgba(255,255,255,0.4); margin-bottom: 12px; transition: 0.3s; min-height: 20px;}
+.lrc-line.active { color: #fff; font-size: 16px; font-weight: bold; text-shadow: 0 0 10px rgba(255,255,255,0.3); transform: scale(1.05); }
+
+.music-ctrl-btn { background: none; border: none; color: #fff; font-size: 28px; cursor: pointer; transition: 0.2s; }
+.music-ctrl-btn:hover { transform: scale(1.1); color: var(--ac); }
+
+input[type=range] { -webkit-appearance: none; background: rgba(255,255,255,0.2); border-radius: 4px; outline: none; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: #fff; border-radius: 50%; cursor: pointer; }
 
 </style>
