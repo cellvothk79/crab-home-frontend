@@ -1177,6 +1177,7 @@ function renderPanel(name){
   else if(name==='media'){renderMediaPanel();} 
   else if(name==='searchChat'){renderSearchPanel();} 
   else if(name==='monitor'){renderMonitorPanel();} 
+  else if(name==='moments'){renderMomentsPanel();} 
 
 }
 
@@ -2585,4 +2586,298 @@ async function elbowStrike() {
   } catch(e) {
       hideTyping(); alert('肘击失败：' + e.message);
   }
+}
+// ═══════════════════════════════════════
+//  动态 (Moments) 朋友圈系统
+// ═══════════════════════════════════════
+
+let allMoments = [];
+let momentsOldestTs = null;
+let momentsNoMore = false;
+let momentsLoading = false;
+
+// 智能时间格式化（今天/昨天/日期）
+function formatMomentTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    
+    if (d.toDateString() === now.toDateString()) return `今天 ${timeStr}`;
+    
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (d.toDateString() === yesterday.toDateString()) return `昨天 ${timeStr}`;
+    
+    return `${d.getMonth() + 1}月${d.getDate()}日 ${timeStr}`;
+}
+
+// 渲染动态面板大框
+async function renderMomentsPanel() {
+    const el = document.getElementById('panelContent');
+    el.innerHTML = `
+        <div class="panel-hdr">
+            <span class="panel-title">🦀 他的动态</span>
+            <button class="h-btn" onclick="closePanel()">关闭</button>
+        </div>
+        <div id="momentsStats" style="font-size:12px; color:var(--td); margin-bottom:15px; padding-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center;">
+            <span>数据加载中...</span>
+        </div>
+        <div id="momentsList"></div>
+        <div id="momentsLoading" style="text-align:center; padding:20px; color:var(--tf); font-size:12px;">加载中...</div>
+    `;
+    
+    allMoments = [];
+    momentsOldestTs = null;
+    momentsNoMore = false;
+    
+    loadMomentsStats();
+    await loadMoments(false);
+    
+    // 绑定滚动到底部自动加载事件
+    el.onscroll = function() {
+        if (this.scrollHeight - this.scrollTop - this.clientHeight < 50) {
+            loadMoments(true);
+        }
+    };
+}
+
+// 获取顶部统计数据
+async function loadMomentsStats() {
+    if(!cfg.base) return;
+    try {
+        const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/moments/stats');
+        const d = await r.json();
+        document.getElementById('momentsStats').innerHTML = `
+            <span>共 ${d.total||0} 条动态 · 本周 ${d.recent||0} 条</span>
+            <button class="h-btn" style="padding:4px 8px; font-size:10px" onclick="triggerTestMoment()">✨ 催更动态</button>
+        `;
+    } catch(e) {}
+}
+
+// 测试按钮：手动让他发一条
+async function triggerTestMoment() {
+    if(!confirm('此为后台强制催更测试，确认触发？')) return;
+    try {
+        await fetch(cfg.base.replace(/\/+$/, '') + '/api/moments/generate', { method: 'POST' });
+        alert('触发成功！重新打开面板查看吧');
+    } catch(e) { alert('触发失败'); }
+}
+
+// 分页加载动态
+async function loadMoments(isLoadMore = false) {
+    if (!cfg.base || momentsLoading || momentsNoMore) return;
+    momentsLoading = true;
+    const loadingEl = document.getElementById('momentsLoading');
+    if (loadingEl) loadingEl.textContent = '加载中...';
+
+    try {
+        let url = cfg.base.replace(/\/+$/, '') + '/api/moments?limit=20';
+        if (isLoadMore && momentsOldestTs) {
+            url += `&before=${encodeURIComponent(momentsOldestTs)}`;
+        }
+        const r = await fetch(url);
+        const data = await r.json();
+
+        if (!data || data.length === 0) {
+            momentsNoMore = true;
+            if (loadingEl) loadingEl.textContent = allMoments.length > 0 ? '—— 到底了 ——' : '';
+            if (allMoments.length === 0) {
+                document.getElementById('momentsList').innerHTML = `
+                    <div style="text-align:center; padding:40px 0; color:var(--tf);">
+                        <div style="font-size:40px; margin-bottom:10px;">🦀</div>
+                        <div style="font-size:13px; margin-bottom:5px;">他还没发过动态</div>
+                        <div style="font-size:11px;">等他想说点什么的时候...</div>
+                    </div>
+                `;
+            }
+        } else {
+            allMoments = isLoadMore ? [...allMoments, ...data] : data;
+            momentsOldestTs = data[data.length - 1].created_at;
+            if (data.length < 20) {
+                momentsNoMore = true;
+                if (loadingEl) loadingEl.textContent = '—— 到底了 ——';
+            } else {
+                if (loadingEl) loadingEl.textContent = '下拉加载更多...';
+            }
+            renderMomentsList();
+        }
+    } catch (e) {
+        if (loadingEl) loadingEl.textContent = '加载失败，请重试';
+    } finally {
+        momentsLoading = false;
+    }
+}
+
+// 渲染卡片列表
+function renderMomentsList() {
+    const listEl = document.getElementById('momentsList');
+    if (!listEl) return;
+    
+    listEl.innerHTML = allMoments.map(m => {
+        let sourceTag = '';
+        if (m.source === 'subconscious') sourceTag = '<span class="moment-tag" title="便签触发">🧠 灵感触发</span>';
+        else if (m.source === 'spontaneous') sourceTag = '<span class="moment-tag" title="自发动态">✨ 随性一条</span>';
+
+        return `
+        <div class="moment-card" id="moment_${m.id}">
+            <div class="moment-header">
+                <div class="moment-user">
+                    <div class="moment-avatar">🦀</div>
+                    <span>Claude</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span class="moment-time">${formatMomentTime(m.created_at)}</span>
+                    <button class="moment-del-btn" onclick="deleteMoment(${m.id})" title="删除动态">✕</button>
+                </div>
+            </div>
+            <div class="moment-content">${esc(m.content)}</div>
+            <div class="moment-meta">
+                <div class="moment-meta-left">
+                    ${m.mood ? `<span title="心情"><span style="opacity:0.7">💭</span> ${esc(m.mood)}</span>` : ''}
+                    ${sourceTag}
+                </div>
+                <div class="moment-comments-btn" onclick="toggleMomentComments(${m.id})">
+                    💬 <span id="moment_cc_${m.id}">${m.comment_count || 0}</span>
+                </div>
+            </div>
+            <div class="moment-comments-area" id="moment_comments_${m.id}">
+                <div class="moment-comment-list" id="moment_clist_${m.id}">
+                    <div style="text-align:center; color:var(--tf); font-size:11px; padding:10px;">加载评论中...</div>
+                </div>
+                <div class="moment-input-wrap">
+                    <input type="text" class="moment-input" id="moment_inp_${m.id}" placeholder="写评论..." onkeydown="if(event.key==='Enter') sendMomentComment(${m.id})">
+                    <button class="moment-send-btn" id="moment_send_${m.id}" onclick="sendMomentComment(${m.id})">发送</button>
+                </div>
+            </div>
+        </div>
+        `;
+    }).join('');
+}
+
+async function deleteMoment(id) {
+    if (!confirm('确定要删除这条动态吗？')) return;
+    try {
+        const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/moments/' + id, { method: 'DELETE' });
+        if (r.ok) {
+            allMoments = allMoments.filter(m => m.id !== id);
+            const card = document.getElementById('moment_' + id);
+            if (card) card.remove();
+            loadMomentsStats();
+        } else {
+            alert('删除失败');
+        }
+    } catch (e) { alert('网络错误'); }
+}
+
+// 展开/折叠 评论区
+async function toggleMomentComments(id) {
+    const area = document.getElementById('moment_comments_' + id);
+    if (!area) return;
+    if (area.style.display === 'block') {
+        area.style.display = 'none';
+    } else {
+        area.style.display = 'block';
+        await loadMomentComments(id);
+    }
+}
+
+// 加载评论数据
+async function loadMomentComments(id) {
+    const listEl = document.getElementById('moment_clist_' + id);
+    if (!listEl || !cfg.base) return;
+    
+    try {
+        const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/moments/' + id + '/comments');
+        const comments = await r.json();
+        
+        const ccEl = document.getElementById('moment_cc_' + id);
+        if (ccEl) ccEl.textContent = comments.length;
+        
+        const mIdx = allMoments.findIndex(m => m.id === id);
+        if (mIdx !== -1) allMoments[mIdx].comment_count = comments.length;
+
+        if (comments.length === 0) {
+            listEl.innerHTML = '<div style="text-align:center; color:var(--tf); font-size:11px; padding:10px;">还没有人评论，快来抢沙发~</div>';
+            return;
+        }
+
+        listEl.innerHTML = comments.map(c => `
+            <div class="moment-comment-item" id="comment_${c.id}">
+                <div style="display:flex; flex:1;">
+                    <span class="${c.role === 'user' ? 'c-user' : 'c-ai'}">${c.role === 'user' ? '👩 peri' : '🦀 Claude'}：</span>
+                    <span class="c-content">${esc(c.content)}</span>
+                </div>
+                <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                    <span class="c-time">${formatMomentTime(c.created_at)}</span>
+                    <button class="moment-comment-del" onclick="deleteMomentComment(${c.id}, ${id})">✕</button>
+                </div>
+            </div>
+        `).join('');
+        
+        listEl.scrollTop = listEl.scrollHeight;
+    } catch (e) {
+        listEl.innerHTML = '<div style="text-align:center; color:#c46; font-size:11px; padding:10px;">加载评论失败</div>';
+    }
+}
+
+async function deleteMomentComment(cid, mid) {
+    if (!confirm('删除这条评论？')) return;
+    try {
+        const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/moments/comments/' + cid, { method: 'DELETE' });
+        if (r.ok) {
+            await loadMomentComments(mid);
+            loadMomentsStats();
+        } else alert('删除失败');
+    } catch (e) {}
+}
+
+// 发送评论 + 轮询 AI 回复
+async function sendMomentComment(mid) {
+    const inp = document.getElementById('moment_inp_' + mid);
+    const btn = document.getElementById('moment_send_' + mid);
+    const content = inp.value.trim();
+    if (!content || !cfg.base) return;
+
+    inp.disabled = true;
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    try {
+        const r = await fetch(cfg.base.replace(/\/+$/, '') + '/api/moments/' + mid + '/comments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        
+        if (!r.ok) throw new Error('发送失败');
+        
+        inp.value = '';
+        await loadMomentComments(mid); // 立刻看到自己的评论
+
+        // 轮询魔法：等他 3 秒，看他回没回，没回就再等 3 秒 (最多试 2 次)
+        let retries = 0;
+        const pollAiReply = async () => {
+            retries++;
+            await loadMomentComments(mid);
+            const listEl = document.getElementById('moment_clist_' + mid);
+            const lastCommentIsAi = listEl && listEl.lastElementChild && listEl.lastElementChild.innerHTML.includes('🦀 Claude');
+            
+            if (!lastCommentIsAi && retries <= 2) {
+                setTimeout(pollAiReply, 3000);
+            } else if (lastCommentIsAi) {
+                loadMomentsStats(); // 刷一下总评论数
+            }
+        };
+        setTimeout(pollAiReply, 3000);
+
+    } catch (e) {
+        alert(e.message);
+    } finally {
+        inp.disabled = false;
+        btn.disabled = false;
+        btn.textContent = '发送';
+        inp.focus();
+    }
 }
