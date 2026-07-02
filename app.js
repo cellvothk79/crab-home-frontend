@@ -2117,7 +2117,11 @@ async function generateMediaReview(id) {
     
     if(!r.ok) { const err = await r.json().catch(()=>({})); throw new Error(err.error || '生成失败'); }
     
-    await loadMediaRecords();
+    // 先刷新数据（但不渲染grid，因为当前在详情页里mediaGrid不存在）
+    if(cfg.base && currentSession) {
+      const r2 = await fetch(cfg.base.replace(/\/+$/, '') + '/api/media/' + currentSession.id);
+      allMedia = await r2.json();
+    }
     showMediaDetail(id);
   } catch(e) {
     alert(e.message);
