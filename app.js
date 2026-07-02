@@ -919,8 +919,14 @@ function hideTyping(){if(typingEl){typingEl.remove();typingEl=null;}}
 
 // ═══════════ IMAGE ═══════════
 function sendImage(e){
-  const f=e.target.files[0];if(!f)return;
+  const files=e.target.files;if(!files||files.length===0)return;
   e.target.value='';
+  // 逐个处理每张图片
+  for(let i=0;i<files.length;i++){
+    processSingleImage(files[i], i);
+  }
+}
+function processSingleImage(f, idx){
   const url=URL.createObjectURL(f);
   const img=new Image();
   img.onload=function(){
@@ -935,17 +941,15 @@ function sendImage(e){
     canvas.getContext('2d').drawImage(img,0,0,w,h);
     const mime='image/jpeg';
     const b64=canvas.toDataURL(mime,0.75).split(',')[1];
-    const m={id:Date.now().toString(),role:'user',content:'',ts:new Date().toISOString(),type:'image',imageUrl:url,imageBase64:b64,imageMime:mime};
+    const m={id:(Date.now()+idx).toString(),role:'user',content:'',ts:new Date().toISOString(),type:'image',imageUrl:url,imageBase64:b64,imageMime:mime};
     messages.push(m);saveMessages();renderMessages();
-    document.getElementById('msgInput').focus();
   };
   img.onerror=function(){
     const reader=new FileReader();
     reader.onload=function(ev){
       const b64=ev.target.result.split(',')[1];
-      const m={id:Date.now().toString(),role:'user',content:'',ts:new Date().toISOString(),type:'image',imageUrl:url,imageBase64:b64,imageMime:f.type||'image/jpeg'};
+      const m={id:(Date.now()+idx).toString(),role:'user',content:'',ts:new Date().toISOString(),type:'image',imageUrl:url,imageBase64:b64,imageMime:f.type||'image/jpeg'};
       messages.push(m);saveMessages();renderMessages();
-      document.getElementById('msgInput').focus();
     };
     reader.readAsDataURL(f);
   };
